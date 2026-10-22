@@ -20,7 +20,6 @@ import {
   sub,
   syncedTip,
   distinctOf,
-  type Filters,
   type SortKey,
 } from '../lib/records';
 import {
@@ -311,7 +310,6 @@ function RecordsView({ data }: { data: RecordsData }) {
   const expiryCount = (k: string) =>
     k === 'has' ? data.records.filter((r) => r.meta.expires_at).length : k === 'none' ? data.records.filter((r) => !r.meta.expires_at).length : data.summary[k] ?? 0;
 
-  const setF = (p: Partial<Filters>) => setFilters(p);
   const cols = showExpiry ? 7 : 6;
 
   // Targets shared by two or more records (any filter), for grouping.
@@ -357,9 +355,9 @@ function RecordsView({ data }: { data: RecordsData }) {
           placeholder="搜尋名稱、內容、負責人"
           aria-label="搜尋"
           value={f.q}
-          onChange={(e) => setF({ q: e.target.value })}
+          onChange={(e) => setFilters({ q: e.target.value })}
         />
-        <select className="input" aria-label="類型" value={f.type} onChange={(e) => setF({ type: e.target.value })}>
+        <select className="input" aria-label="類型" value={f.type} onChange={(e) => setFilters({ type: e.target.value })}>
           <option value="">全部類型</option>
           {types.map((t) => (
             <option key={t} value={t}>
@@ -367,7 +365,7 @@ function RecordsView({ data }: { data: RecordsData }) {
             </option>
           ))}
         </select>
-        <select className="input" aria-label="分組" value={f.group} onChange={(e) => setF({ group: e.target.value })}>
+        <select className="input" aria-label="分組" value={f.group} onChange={(e) => setFilters({ group: e.target.value })}>
           <option value="">全部分組</option>
           {data.groups.map(([g, n]) => (
             <option key={g} value={g}>
@@ -375,7 +373,7 @@ function RecordsView({ data }: { data: RecordsData }) {
             </option>
           ))}
         </select>
-        <select className="input" aria-label="健康狀態" value={f.health} onChange={(e) => setF({ health: e.target.value })}>
+        <select className="input" aria-label="健康狀態" value={f.health} onChange={(e) => setFilters({ health: e.target.value })}>
           <option value="">全部健康狀態</option>
           {kindOptions.map((k) => (
             <option key={k} value={k}>
@@ -385,7 +383,7 @@ function RecordsView({ data }: { data: RecordsData }) {
           <option value="listed">已上架到入口（{data.records.filter((r) => r.listing).length}）</option>
           <option value="muted">含已忽略項目（{data.records.filter((r) => r.muted.length).length}）</option>
         </select>
-        <select className="input" aria-label="到期狀態" value={f.expiry} onChange={(e) => setF({ expiry: e.target.value })}>
+        <select className="input" aria-label="到期狀態" value={f.expiry} onChange={(e) => setFilters({ expiry: e.target.value })}>
           <option value="">全部到期狀態</option>
           {['expired', 'expiring', 'has', 'none'].map((k) => (
             <option key={k} value={k}>
@@ -411,7 +409,7 @@ function RecordsView({ data }: { data: RecordsData }) {
                 type="button"
                 className={'sev-link' + (f.severity === k ? ' active' : '') + (k ? ' sev-' + k : '')}
                 aria-pressed={f.severity === k}
-                onClick={() => setF({ severity: k })}
+                onClick={() => setFilters({ severity: k })}
               >
                 {label} {n}
               </button>

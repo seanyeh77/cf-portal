@@ -20,9 +20,6 @@ const (
 	Info   = "info"
 )
 
-// LevelRank orders levels; lower is more severe.
-var LevelRank = map[string]int{High: 0, Medium: 1, Low: 2, Info: 3}
-
 // Kind describes one kind of issue.
 type Kind struct {
 	Key   string `json:"key"`
@@ -31,7 +28,7 @@ type Kind struct {
 	Help  string `json:"help"`
 }
 
-// Kinds lists all issue kinds in display order.
+// Kinds lists all issue kinds in display order, most severe level first.
 var Kinds = []Kind{
 	{"bad_target", High, "CNAME 目標無效", "CNAME 須指向完整網域，不可為 localhost、IP 位址或不含網域的名稱。請改為正確的目標或刪除此 record。"},
 	{"loopback", High, "指向本機位址", "127.0.0.1、::1、0.0.0.0 只代表使用者自己的電腦，無法連到伺服器。請改為正確的 IP 或刪除此 record。"},
@@ -290,63 +287,46 @@ func Analyze(in Input) *Result {
 		}
 	}
 
-	// upstream_broken propagates down CNAME chains.
-	type state struct {
-		done   bool
-		broken *Issue // issue describing the upstream problem, nil if fine
-	}
-	memo := map[string]*state{}
-	var brokenOf func(id string, depth int) *Issue
+	// upstream_broken propagates down CNAME chains. broken returns the first
+	// broken (or upstream_broken) issue of id; a cycle counts as fine.
 	recByID := map[string]model.Record{}
 	for _, r := range in.Records {
 		recByID[r.ID] = r
 	}
-	var upstreamOf func(r model.Record, depth int) *Issue
-	brokenOf = func(id string, depth int) *Issue {
-		// returns the first broken (or upstream_broken) issue of id
-		if s, ok := memo[id]; ok {
-			if !s.done {
-				return nil // cycle
-			}
-			return s.broken
+	memo := map[string]*Issue{}
+	visiting := map[string]bool{}
+	upstreamIssue := map[string]Issue{}
+	var broken func(id string) *Issue
+	broken = func(id string) *Issue {
+		if is, ok := memo[id]; ok || visiting[id] {
+			return is
 		}
-		s := &state{}
-		memo[id] = s
+		visiting[id] = true
+		defer delete(visiting, id)
 		var res *Issue
 		for _, is := range raw[id] {
 			if brokenKinds[is.Kind] {
-				c := is
-				res = &c
+				res = &is
 				break
 			}
 		}
-		if res == nil && depth < 32 {
-			res = upstreamOf(recByID[id], depth+1)
+		if r := recByID[id]; res == nil && r.Type == "CNAME" {
+			target := dnsrec.NormalizeTarget(r.Content)
+			for _, t := range byName[target] {
+				if b := broken(t.ID); t.ID != id && b != nil {
+					is := newIssue("upstream_broken", fmt.Sprintf("上游 %s：%s", target, b.Label))
+					is.Upstream = t.ID
+					upstreamIssue[id] = is
+					res = &is
+					break
+				}
+			}
 		}
-		s.done, s.broken = true, res
+		memo[id] = res
 		return res
 	}
-	upstreamIssue := map[string]Issue{}
-	upstreamOf = func(r model.Record, depth int) *Issue {
-		if r.Type != "CNAME" {
-			return nil
-		}
-		target := dnsrec.NormalizeTarget(r.Content)
-		for _, t := range byName[target] {
-			if t.ID == r.ID {
-				continue
-			}
-			if b := brokenOf(t.ID, depth); b != nil {
-				is := newIssue("upstream_broken", fmt.Sprintf("上游 %s：%s", target, b.Label))
-				is.Upstream = t.ID
-				upstreamIssue[r.ID] = is
-				return &is
-			}
-		}
-		return nil
-	}
 	for _, r := range in.Records {
-		brokenOf(r.ID, 0)
+		broken(r.ID)
 	}
 	for id, is := range upstreamIssue {
 		raw[id] = append(raw[id], is)
@@ -356,13 +336,8 @@ func Analyze(in Input) *Result {
 	groupCount := map[string]int{}
 	for _, r := range in.Records {
 		issues := raw[r.ID]
-		sort.SliceStable(issues, func(i, j int) bool {
-			li, lj := LevelRank[issues[i].Level], LevelRank[issues[j].Level]
-			if li != lj {
-				return li < lj
-			}
-			return kindOrder[issues[i].Kind] < kindOrder[issues[j].Kind]
-		})
+		// Kinds is listed by severity, so its order is the sort order.
+		sort.SliceStable(issues, func(i, j int) bool { return kindOrder[issues[i].Kind] < kindOrder[issues[j].Kind] })
 		rr := &RecordResult{Issues: []Issue{}, Muted: []Issue{}, Group: dnsrec.Group(r.Name, zone)}
 		for _, is := range issues {
 			if in.Mutes[r.ID][is.Kind] {

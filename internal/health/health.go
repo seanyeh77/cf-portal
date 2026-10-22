@@ -70,7 +70,7 @@ func (c *Checker) record(ctx context.Context, checks []store.Check) {
 	if err := c.Store.AddChecks(ctx, checks, float64(time.Now().Add(-retention).Unix())); err != nil {
 		log.Printf("health: store checks: %v", err)
 	}
-	if err := c.refresh(ctx, time.Now()); err != nil {
+	if err := c.refresh(ctx, time.Now(), true); err != nil {
 		log.Printf("health: summarize: %v", err)
 	}
 }
@@ -101,27 +101,20 @@ func (c *Checker) Run(ctx context.Context) { loop.Every(ctx, c.Interval, c.RunOn
 
 // Summary is the status of one service.
 type Summary struct {
-	Last        *LastCheck `json:"last"`
-	Uptime24    *float64   `json:"uptime_24h"`
-	Buckets     []*float64 `json:"buckets"`
-	BucketStart float64    `json:"bucket_start"`
-	BucketSize  int        `json:"bucket_size"`
+	Last        *store.Check `json:"last"`
+	Uptime24    *float64     `json:"uptime_24h"`
+	Buckets     []*float64   `json:"buckets"`
+	BucketStart float64      `json:"bucket_start"`
+	BucketSize  int          `json:"bucket_size"`
 }
 
-// LastCheck is the latest check.
-type LastCheck struct {
-	TS     float64 `json:"ts"`
-	OK     bool    `json:"ok"`
-	MS     int     `json:"ms"`
-	Status int     `json:"status"`
-}
-
-// refresh recomputes the summaries from aggregated checks. Only one
-// refresh runs at a time; callers arriving meanwhile reuse its result.
-func (c *Checker) refresh(ctx context.Context, now time.Time) error {
+// refresh recomputes the summaries from aggregated checks, one at a time.
+// force is for new check results; otherwise a cache already in now's
+// bucket (e.g. built while this caller waited for the lock) is kept.
+func (c *Checker) refresh(ctx context.Context, now time.Time, force bool) error {
 	c.refreshMu.Lock()
 	defer c.refreshMu.Unlock()
-	if cur := c.cache.Load(); cur != nil && !cur.at.Before(now) {
+	if cur := c.cache.Load(); cur != nil && !force && bucketStart(cur.at).Equal(bucketStart(now)) {
 		return nil
 	}
 	start := bucketStart(now)
@@ -143,7 +136,7 @@ func (c *Checker) refresh(ctx context.Context, now time.Time) error {
 func (c *Checker) Summaries(ctx context.Context, now time.Time, ls []model.Listing) (map[string]Summary, error) {
 	cur := c.cache.Load()
 	if cur == nil || !bucketStart(now).Equal(bucketStart(cur.at)) {
-		if err := c.refresh(ctx, now); err != nil {
+		if err := c.refresh(ctx, now, false); err != nil {
 			return nil, err
 		}
 		cur = c.cache.Load()
@@ -183,9 +176,7 @@ func summaryOf(st *store.CheckStat, start time.Time) Summary {
 		v := ratio(st.UpOK, st.UpTotal)
 		s.Uptime24 = &v
 	}
-	if l := st.Last; l != nil {
-		s.Last = &LastCheck{TS: l.TS, OK: l.OK, MS: l.MS, Status: l.Status}
-	}
+	s.Last = st.Last
 	return s
 }
 

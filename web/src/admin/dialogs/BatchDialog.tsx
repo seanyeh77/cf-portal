@@ -27,18 +27,11 @@ export function BatchDialog({ mode: initialMode, data }: { mode: 'rule' | 'csv';
   const [purpose, setPurpose] = useState('');
   const [expires, setExpires] = useState('');
   const [autoDelete, setAutoDelete] = useState(false);
-  const [preview, setPreview] = useState<Result[] | null>(null);
+  // A dry run is valid only for the exact rows it checked.
+  const [checked, setChecked] = useState<{ rows: Row[]; results: Result[] } | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-
-  // Any change invalidates the preview.
-  const touch =
-    <T,>(fn: (v: T) => void) =>
-    (v: T) => {
-      fn(v);
-      setPreview(null);
-    };
 
   const rows = useMemo((): Row[] | string => {
     const common = { owner, purpose, notes: '', expires_at: expires, auto_delete: autoDelete, no_scan: false };
@@ -108,8 +101,8 @@ export function BatchDialog({ mode: initialMode, data }: { mode: 'rule' | 'csv';
     }
     setBusy(true);
     try {
-      const res = await api<{ results: Result[]; created: number; ok: number }>('POST', '/api/records/batch', { records: rows, dry_run: dry });
-      if (dry) setPreview(res.results);
+      const res = await api<{ results: Result[]; created: number }>('POST', '/api/records/batch', { records: rows, dry_run: dry });
+      if (dry) setChecked({ rows, results: res.results });
       else {
         toast(`已建立 ${res.created} 筆`);
         closeModal();
@@ -122,6 +115,7 @@ export function BatchDialog({ mode: initialMode, data }: { mode: 'rule' | 'csv';
     }
   };
 
+  const preview = checked && checked.rows === rows ? checked.results : null;
   const okCount = preview?.filter((r) => r.ok).length ?? 0;
   const skip = (preview?.length ?? 0) - okCount;
 
@@ -148,11 +142,11 @@ export function BatchDialog({ mode: initialMode, data }: { mode: 'rule' | 'csv';
       }
     >
       <div className="mode-switch">
-        <button type="button" className={'linkbtn' + (mode === 'rule' ? ' current' : ' plain')} aria-pressed={mode === 'rule'} onClick={() => touch(setMode)('rule')}>
+        <button type="button" className={'linkbtn' + (mode === 'rule' ? ' current' : ' plain')} aria-pressed={mode === 'rule'} onClick={() => setMode('rule')}>
           依規則產生
         </button>
         <span className="faint">/</span>
-        <button type="button" className={'linkbtn' + (mode === 'csv' ? ' current' : ' plain')} aria-pressed={mode === 'csv'} onClick={() => touch(setMode)('csv')}>
+        <button type="button" className={'linkbtn' + (mode === 'csv' ? ' current' : ' plain')} aria-pressed={mode === 'csv'} onClick={() => setMode('csv')}>
           CSV
         </button>
       </div>
@@ -163,13 +157,13 @@ export function BatchDialog({ mode: initialMode, data }: { mode: 'rule' | 'csv';
               名稱範本 <Tip text="{n} 會替換為編號，例：student{n} → student001" />
             </label>
             <div className="suffix-input">
-              <input id="b-name" className="input mono" value={nameTpl} onChange={(e) => touch(setNameTpl)(e.target.value)} />
+              <input id="b-name" className="input mono" value={nameTpl} onChange={(e) => setNameTpl(e.target.value)} />
               <span className="suffix">.{data.zone}</span>
             </div>
           </div>
           <div className="field">
             <label htmlFor="b-type">Type</label>
-            <select id="b-type" className="input" value={type} onChange={(e) => touch(setType)(e.target.value)}>
+            <select id="b-type" className="input" value={type} onChange={(e) => setType(e.target.value)}>
               {REQUEST_TYPES.map((t) => (
                 <option key={t}>{t}</option>
               ))}
@@ -179,20 +173,20 @@ export function BatchDialog({ mode: initialMode, data }: { mode: 'rule' | 'csv';
             <label htmlFor="b-content">
               內容範本 <Tip text="{n} 替換為編號，不補零，例：10.0.3.{n}" />
             </label>
-            <input id="b-content" className="input mono" value={contentTpl} onChange={(e) => touch(setContentTpl)(e.target.value)} />
+            <input id="b-content" className="input mono" value={contentTpl} onChange={(e) => setContentTpl(e.target.value)} />
           </div>
           <div className="three">
             <div className="field">
               <label htmlFor="b-from">起始編號</label>
-              <input id="b-from" className="input" type="number" value={from} onChange={(e) => touch(setFrom)(e.target.value)} />
+              <input id="b-from" className="input" type="number" value={from} onChange={(e) => setFrom(e.target.value)} />
             </div>
             <div className="field">
               <label htmlFor="b-to">結束編號</label>
-              <input id="b-to" className="input" type="number" value={to} onChange={(e) => touch(setTo)(e.target.value)} />
+              <input id="b-to" className="input" type="number" value={to} onChange={(e) => setTo(e.target.value)} />
             </div>
             <div className="field">
               <label htmlFor="b-pad">名稱補零</label>
-              <select id="b-pad" className="input" value={width} onChange={(e) => touch(setWidth)(e.target.value)}>
+              <select id="b-pad" className="input" value={width} onChange={(e) => setWidth(e.target.value)}>
                 <option value="0">不補零</option>
                 <option value="2">2 位</option>
                 <option value="3">3 位</option>
@@ -210,7 +204,7 @@ export function BatchDialog({ mode: initialMode, data }: { mode: 'rule' | 'csv';
               hidden
               onChange={async (e) => {
                 const f = e.target.files?.[0];
-                if (f) touch(setCsv)(await f.text());
+                if (f) setCsv(await f.text());
               }}
             />
             <button type="button" className="btn small" onClick={() => fileRef.current?.click()}>
@@ -226,7 +220,7 @@ export function BatchDialog({ mode: initialMode, data }: { mode: 'rule' | 'csv';
             aria-label="CSV 內容"
             value={csv}
             placeholder={'name,type,content,owner\nstudent001,A,10.0.3.1,王小明'}
-            onChange={(e) => touch(setCsv)(e.target.value)}
+            onChange={(e) => setCsv(e.target.value)}
           />
         </div>
       )}
@@ -234,24 +228,24 @@ export function BatchDialog({ mode: initialMode, data }: { mode: 'rule' | 'csv';
       <div className="three">
         <div className="field">
           <label htmlFor="b-owner">負責人</label>
-          <input id="b-owner" className="input" value={owner} onChange={(e) => touch(setOwner)(e.target.value)} />
+          <input id="b-owner" className="input" value={owner} onChange={(e) => setOwner(e.target.value)} />
         </div>
         <div className="field">
           <label htmlFor="b-purpose">用途</label>
-          <input id="b-purpose" className="input" value={purpose} onChange={(e) => touch(setPurpose)(e.target.value)} />
+          <input id="b-purpose" className="input" value={purpose} onChange={(e) => setPurpose(e.target.value)} />
         </div>
         <div className="field">
           <label htmlFor="b-exp">到期日</label>
           <div className="row-gap">
-            <input id="b-exp" className="input date" type="date" value={expires} onChange={(e) => touch(setExpires)(e.target.value)} />
-            <button type="button" className="btn small" onClick={() => touch(setExpires)(semesterEnd(data.today))}>
+            <input id="b-exp" className="input date" type="date" value={expires} onChange={(e) => setExpires(e.target.value)} />
+            <button type="button" className="btn small" onClick={() => setExpires(semesterEnd(data.today))}>
               學期末
             </button>
           </div>
         </div>
       </div>
       <label className="check">
-        <input type="checkbox" checked={autoDelete} onChange={(e) => touch(setAutoDelete)(e.target.checked)} />
+        <input type="checkbox" checked={autoDelete} onChange={(e) => setAutoDelete(e.target.checked)} />
         到期自動刪除
       </label>
       {mode === 'csv' && <p className="small muted">CSV 中有填寫的欄位優先於共同欄位。</p>}

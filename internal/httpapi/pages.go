@@ -23,11 +23,7 @@ func (s *Server) writePage(w http.ResponseWriter, status int, entry string, data
 	h.Set("Cache-Control", "no-store")
 	h.Set("Content-Security-Policy", pageCSP)
 	w.WriteHeader(status)
-	w.Write(s.page(entry, data))
-}
-
-func (s *Server) page(entry string, data any) []byte {
-	return webui.Render(s.Assets, entry, data)
+	w.Write(webui.Render(s.Assets, entry, data))
 }
 
 func (s *Server) serveAsset(w http.ResponseWriter, r *http.Request) {

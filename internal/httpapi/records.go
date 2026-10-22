@@ -6,7 +6,6 @@ import (
 	"maps"
 	"net/http"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -37,7 +36,7 @@ type recordOut struct {
 	Group    string `json:"group"`
 	// Level is the row level: the most severe non-info issue, or "".
 	Level string `json:"level"`
-	// TargetKey is the canonical target used by "targets" (A/AAAA/CNAME).
+	// TargetKey is the canonical target of A/AAAA/CNAME records, for grouping.
 	TargetKey string           `json:"target_key"`
 	Listing   *listingOut      `json:"listing"`
 	Meta      model.Meta       `json:"meta"`
@@ -600,17 +599,20 @@ func (s *Server) apiBulkMeta(w http.ResponseWriter, r *http.Request) {
 		}
 		befores[id], afters[id] = all[id], after
 	}
+	// One audit entry per changed record, so each record's history shows
+	// it and it can be undone like a single meta change.
 	changed := 0
 	for _, id := range b.IDs {
-		if afters[id] != befores[id] {
-			if err := s.Store.PutMeta(ctx, id, afters[id]); err != nil {
-				writeAnyErr(w, err)
-				return
-			}
-			changed++
+		if afters[id] == befores[id] {
+			continue
 		}
+		if err := s.Store.PutMeta(ctx, id, afters[id]); err != nil {
+			writeAnyErr(w, err)
+			return
+		}
+		s.auditLog(r, "bulk_meta", s.recordName(ctx, id), map[string]any{"record_id": id, "meta_before": befores[id], "meta_after": afters[id]})
+		changed++
 	}
-	s.auditLog(r, "bulk_meta", strconv.Itoa(len(b.IDs))+" 筆", map[string]any{"ids": b.IDs, "set": b.Set, "before": befores})
 	writeJSON(w, http.StatusOK, map[string]any{"updated": changed})
 }
 

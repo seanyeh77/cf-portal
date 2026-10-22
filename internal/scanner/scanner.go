@@ -150,15 +150,22 @@ func ParsePorts(s string) ([]int, error) {
 	return out, nil
 }
 
-// Trigger starts a full scan in the background unless one is running.
-func (s *Scanner) Trigger() bool {
+// claim marks a full scan as running; false if one already is.
+func (s *Scanner) claim() bool {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.st.Running {
-		s.mu.Unlock()
 		return false
 	}
 	s.st.Running = true
-	s.mu.Unlock()
+	return true
+}
+
+// Trigger starts a full scan in the background unless one is running.
+func (s *Scanner) Trigger() bool {
+	if !s.claim() {
+		return false
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
@@ -169,14 +176,9 @@ func (s *Scanner) Trigger() bool {
 
 // RunOnce scans all eligible records and waits for completion.
 func (s *Scanner) RunOnce(ctx context.Context) {
-	s.mu.Lock()
-	if s.st.Running {
-		s.mu.Unlock()
-		return
+	if s.claim() {
+		s.runLocked(ctx)
 	}
-	s.st.Running = true
-	s.mu.Unlock()
-	s.runLocked(ctx)
 }
 
 func (s *Scanner) runLocked(ctx context.Context) {

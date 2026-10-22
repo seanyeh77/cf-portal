@@ -318,3 +318,12 @@ func TestGroups(t *testing.T) {
 		t.Error("record group")
 	}
 }
+
+func TestKindsOrderedBySeverity(t *testing.T) {
+	rank := map[string]int{High: 0, Medium: 1, Low: 2, Info: 3}
+	for i := 1; i < len(Kinds); i++ {
+		if rank[Kinds[i].Level] < rank[Kinds[i-1].Level] {
+			t.Fatalf("%s (%s) listed after %s (%s)", Kinds[i].Key, Kinds[i].Level, Kinds[i-1].Key, Kinds[i-1].Level)
+		}
+	}
+}

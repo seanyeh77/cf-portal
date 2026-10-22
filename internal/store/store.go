@@ -46,7 +46,8 @@ CREATE TABLE IF NOT EXISTS listings (
 );
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS checks (record_id TEXT, ts REAL, ok INTEGER, ms INTEGER, status INTEGER);
-CREATE INDEX IF NOT EXISTS checks_rec_ts ON checks(record_id, ts);
+DROP INDEX IF EXISTS checks_rec_ts;
+CREATE INDEX IF NOT EXISTS checks_rec_cover ON checks(record_id, ts, ok, ms, status);
 CREATE INDEX IF NOT EXISTS checks_ts ON checks(ts);
 CREATE TABLE IF NOT EXISTS record_meta (
   record_id TEXT PRIMARY KEY,
@@ -86,13 +87,16 @@ var columns = map[string][][2]string{
 	"audit":    {{"record_id", "TEXT"}},
 }
 
-// postMigrate runs after columns exist: indexes on migrated columns and
-// backfills. Every statement is idempotent.
+// postMigrate creates indexes on migrated columns; it runs on every start.
 const postMigrate = `
-UPDATE audit SET record_id=json_extract(detail,'$.record_id') WHERE record_id IS NULL AND json_valid(detail);
 CREATE INDEX IF NOT EXISTS audit_record ON audit(record_id);
 CREATE INDEX IF NOT EXISTS audit_target ON audit(lower(target));
 `
+
+// backfills run once, right after their column has been added.
+var backfills = map[string]string{
+	"audit.record_id": `UPDATE audit SET record_id=json_extract(detail,'$.record_id') WHERE json_valid(detail)`,
+}
 
 // Open opens (and migrates) the database at path.
 func Open(path string) (*Store, error) {
@@ -136,6 +140,11 @@ func (s *Store) migrate() error {
 			if !have[c[0]] {
 				if _, err := s.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, c[0], c[1])); err != nil {
 					return fmt.Errorf("migrate %s.%s: %w", table, c[0], err)
+				}
+				if q, ok := backfills[table+"."+c[0]]; ok {
+					if _, err := s.db.Exec(q); err != nil {
+						return fmt.Errorf("backfill %s.%s: %w", table, c[0], err)
+					}
 				}
 			}
 		}
@@ -493,11 +502,11 @@ func (s *Store) IconFileInUse(ctx context.Context, file string) (bool, error) {
 
 // Check is one service status check.
 type Check struct {
-	RecordID string
-	TS       float64
-	OK       bool
-	MS       int
-	Status   int
+	RecordID string  `json:"-"`
+	TS       float64 `json:"ts"`
+	OK       bool    `json:"ok"`
+	MS       int     `json:"ms"`
+	Status   int     `json:"status"`
 }
 
 // AddChecks stores check results and deletes checks older than pruneBefore,
@@ -529,8 +538,9 @@ type CheckStat struct {
 }
 
 // CheckStats aggregates checks per record in SQL: per-bucket counts from
-// bucketStart in buckets of bucketSec, totals since day0, and the latest
-// check. Only aggregates leave the database.
+// bucketStart in buckets of bucketSec, totals since day0 (<= bucketStart),
+// and the latest check. Both queries read the covering index
+// checks_rec_cover; only aggregates leave the database.
 func (s *Store) CheckStats(ctx context.Context, bucketStart, bucketSec, day0 float64) (map[string]*CheckStat, error) {
 	out := map[string]*CheckStat{}
 	get := func(id string) *CheckStat {
@@ -539,8 +549,11 @@ func (s *Store) CheckStats(ctx context.Context, bucketStart, bucketSec, day0 flo
 		}
 		return out[id]
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT record_id, CAST((ts-?)/? AS INTEGER) AS b, SUM(ok), COUNT(*)
-		FROM checks WHERE ts>=? GROUP BY record_id, b`, bucketStart, bucketSec, bucketStart)
+	// One pass since day0: checks before bucketStart land in bucket -1 and
+	// only count toward the 24-hour totals.
+	rows, err := s.db.QueryContext(ctx, `SELECT record_id,
+		CASE WHEN ts>=?1 THEN CAST((ts-?1)/?2 AS INTEGER) ELSE -1 END AS b, SUM(ok), COUNT(*)
+		FROM checks WHERE ts>=?3 GROUP BY record_id, b`, bucketStart, bucketSec, day0)
 	if err != nil {
 		return nil, err
 	}
@@ -551,26 +564,21 @@ func (s *Store) CheckStats(ctx context.Context, bucketStart, bucketSec, day0 flo
 			rows.Close()
 			return nil, err
 		}
-		get(id).Buckets[b] = [2]int{ok, n}
+		st := get(id)
+		st.UpOK += ok
+		st.UpTotal += n
+		if b >= 0 {
+			st.Buckets[b] = [2]int{ok, n}
+		}
 	}
 	rows.Close()
-	rows, err = s.db.QueryContext(ctx, "SELECT record_id, SUM(ok), COUNT(*) FROM checks WHERE ts>=? GROUP BY record_id", day0)
-	if err != nil {
+	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	for rows.Next() {
-		var id string
-		var ok, n int
-		if err := rows.Scan(&id, &ok, &n); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		st := get(id)
-		st.UpOK, st.UpTotal = ok, n
-	}
-	rows.Close()
-	// SQLite returns the other columns from the row holding MAX(ts).
-	rows, err = s.db.QueryContext(ctx, "SELECT record_id, MAX(ts), ok, ms, status FROM checks GROUP BY record_id")
+	// The latest check per record: one index seek each.
+	rows, err = s.db.QueryContext(ctx, `SELECT c.record_id, c.ts, c.ok, c.ms, c.status
+		FROM (SELECT DISTINCT record_id FROM checks) r
+		JOIN checks c ON c.rowid = (SELECT rowid FROM checks WHERE record_id = r.record_id ORDER BY ts DESC LIMIT 1)`)
 	if err != nil {
 		return nil, err
 	}

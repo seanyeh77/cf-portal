@@ -11,6 +11,9 @@ import (
 	"time"
 )
 
+// DefaultListen is the default LISTEN_ADDR.
+const DefaultListen = ":8080"
+
 const defaultCIDRs = "127.0.0.0/8,::1/128,10.0.0.0/8,192.168.0.0/16,fc00::/7"
 
 // Config is the runtime configuration.
@@ -163,7 +166,7 @@ func Load(getenv func(string) string) (*Config, error) {
 		ScanDNSCanary:     r.str("SCAN_DNS_CANARY", "cloudflare.com"),
 		MaintInterval:     r.seconds("MAINT_INTERVAL", 3600),
 		SnapshotKeep:      r.integer("SNAPSHOT_KEEP", 30, 1),
-		Listen:            r.str("LISTEN_ADDR", ":8080"),
+		Listen:            r.str("LISTEN_ADDR", DefaultListen),
 	}
 	if c.SecretKey != "" && len(c.SecretKey) < 32 {
 		r.errs = append(r.errs, "SECRET_KEY must be at least 32 characters")

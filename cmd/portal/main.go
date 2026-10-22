@@ -54,11 +54,11 @@ func main() {
 		}
 	case "health":
 		addr := os.Getenv("LISTEN_ADDR")
-		if addr == "" || strings.HasPrefix(addr, ":") {
-			addr = "127.0.0.1" + addr
-			if addr == "127.0.0.1" {
-				addr += ":8080"
-			}
+		if addr == "" {
+			addr = config.DefaultListen
+		}
+		if strings.HasPrefix(addr, ":") {
+			addr = "127.0.0.1" + addr // listening on all interfaces
 		}
 		c := http.Client{Timeout: 3 * time.Second}
 		resp, err := c.Get("http://" + addr + "/healthz")

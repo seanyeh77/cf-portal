@@ -19,13 +19,10 @@ export type Meta = {
 };
 
 export type Scan = {
-  first_ts: number;
   last_ts: number;
   last_ok_ts: number | null;
   reachable: number;
-  open_ports: string;
   detail: string;
-  dns_status: string;
   dns_detail: string;
 };
 
@@ -42,7 +39,6 @@ export type Listing = {
   icon: string;
   icon_file: string | null;
   created_at: number;
-  updated_at: number;
   effective_url: string;
   icon_url: string;
 };

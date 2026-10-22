@@ -55,9 +55,8 @@ func cleanListing(b listingBody) (listingBody, error) {
 	var tags []string
 	seen := map[string]bool{}
 	for _, t := range b.Tags {
-		for _, p := range strings.Split(t, ",") {
-			p = strings.TrimSpace(p)
-			if p == "" || seen[p] {
+		for _, p := range splitTags(t) {
+			if seen[p] {
 				continue
 			}
 			if len([]rune(p)) > 20 {

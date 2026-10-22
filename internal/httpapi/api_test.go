@@ -574,3 +574,14 @@ func TestNameRuleOnNewNamesOnly(t *testing.T) {
 	del := e.audits()[0]["detail"].(map[string]any)
 	e.mustOK(e.do("POST", "/api/records/restore", map[string]any{"mode": "recreate", "data": del["before"]}))
 }
+
+func TestBulkMetaAuditedPerRecord(t *testing.T) {
+	e := newEnv(t)
+	e.login()
+	a, b := e.mock.Find("A", "student001"), e.mock.Find("A", "student002")
+	e.mustOK(e.do("POST", "/api/records/bulk-meta", map[string]any{"ids": []string{a.ID, b.ID}, "set": map[string]any{"owner": "助教"}}))
+	hist := e.mustOK(e.do("GET", "/api/records/"+a.ID+"/history", nil))["entries"].([]any)
+	if len(hist) != 1 || hist[0].(map[string]any)["action"] != "bulk_meta" || !strings.Contains(hist[0].(map[string]any)["detail"].(string), `"meta_before"`) {
+		t.Fatalf("history of a bulk-edited record: %v", hist)
+	}
+}

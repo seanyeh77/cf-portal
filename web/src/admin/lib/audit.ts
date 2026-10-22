@@ -1,4 +1,5 @@
 import type { AuditEntry, Meta, RecordInput } from '../types';
+import { DNS_FIELD_LABEL } from './records';
 
 export const ACTION_LABEL: Record<string, string> = {
   login: '登入',
@@ -44,7 +45,7 @@ function parseDetail(e: AuditEntry): Detail {
 
 const q = (v: unknown) => (v === '' || v == null ? '""' : JSON.stringify(v));
 
-const DNS_FIELDS: (keyof RecordInput)[] = ['type', 'name', 'content', 'ttl', 'proxied', 'priority', 'comment'];
+const DNS_FIELDS = Object.keys(DNS_FIELD_LABEL) as (keyof RecordInput)[];
 const META_FIELDS: (keyof Meta)[] = ['owner', 'purpose', 'notes', 'expires_at', 'auto_delete', 'no_scan'];
 
 export function fieldChanges<T extends object>(a: T | undefined, b: T | undefined, fields: (keyof T)[]) {
@@ -81,13 +82,8 @@ export function summarize(e: AuditEntry): string {
     case 'record_restore_delete':
       return short(d.before);
     case 'meta_update':
+    case 'bulk_meta':
       return fieldChanges(d.meta_before, d.meta_after, META_FIELDS).join('；');
-    case 'bulk_meta': {
-      const set = (d.set ?? {}) as Record<string, unknown>;
-      return Object.entries(set)
-        .map(([k, v]) => `${k} = ${q(v)}`)
-        .join('；');
-    }
     case 'issue_mute':
     case 'issue_unmute':
       return String(d.label ?? d.kind ?? '');
@@ -151,6 +147,7 @@ export function restorePlan(e: AuditEntry): RestorePlan | null {
       if (!id) return null;
       return { label: '刪除', describe: `自 Cloudflare 刪除 ${short(d.after) || e.target}`, body: { mode: 'delete', record_id: id }, danger: true };
     case 'meta_update':
+    case 'bulk_meta':
       if (!id || !d.meta_before) return null;
       return {
         label: '改回',

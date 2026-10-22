@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"net/http"
 	"strconv"
@@ -133,9 +132,7 @@ func (s *Server) submitRequest(w http.ResponseWriter, r *http.Request) {
 		s.writePage(w, http.StatusUnprocessableEntity, "portal", s.requestPageData(r, errs, v))
 		return
 	}
-	tok := make([]byte, 16)
-	rand.Read(tok)
-	req := model.Request{Token: hex.EncodeToString(tok), IP: ip, Requester: v["requester"], Contact: v["contact"],
+	req := model.Request{Token: rand.Text(), IP: ip, Requester: v["requester"], Contact: v["contact"],
 		Name: in.Name, Type: in.Type, Content: in.Content, Purpose: v["purpose"], ExpiresAt: v["expires_at"]}
 	if _, err := s.Store.AddRequest(ctx, req); err != nil {
 		s.writePage(w, http.StatusInternalServerError, "portal", s.requestPageData(r, []string{"暫時無法送出，請稍後再試。"}, v))
