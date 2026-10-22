@@ -1,0 +1,147 @@
+// Package model holds the plain data types shared across packages.
+package model
+
+// Record is a Cloudflare DNS record.
+type Record struct {
+	ID         string `json:"id"`
+	Type       string `json:"type"`
+	Name       string `json:"name"`
+	Content    string `json:"content"`
+	TTL        int    `json:"ttl"`
+	Proxied    bool   `json:"proxied"`
+	Priority   *int   `json:"priority"`
+	Comment    string `json:"comment"`
+	CreatedOn  string `json:"created_on,omitempty"`
+	ModifiedOn string `json:"modified_on,omitempty"`
+}
+
+// RecordInput is the editable part of a record.
+type RecordInput struct {
+	Type     string `json:"type"`
+	Name     string `json:"name"`
+	Content  string `json:"content"`
+	TTL      int    `json:"ttl"`
+	Proxied  bool   `json:"proxied"`
+	Priority *int   `json:"priority"`
+	Comment  string `json:"comment"`
+}
+
+// Input returns the editable fields of r.
+func (r Record) Input() RecordInput {
+	return RecordInput{Type: r.Type, Name: r.Name, Content: r.Content, TTL: r.TTL, Proxied: r.Proxied, Priority: r.Priority, Comment: r.Comment}
+}
+
+// Meta is management information kept only in this system.
+type Meta struct {
+	Owner      string  `json:"owner"`
+	Purpose    string  `json:"purpose"`
+	Notes      string  `json:"notes"`
+	ExpiresAt  string  `json:"expires_at"`
+	AutoDelete bool    `json:"auto_delete"`
+	NoScan     bool    `json:"no_scan"`
+	UpdatedAt  float64 `json:"-"`
+}
+
+// MetaPatch carries optional meta fields; nil means unchanged.
+type MetaPatch struct {
+	Owner      *string `json:"owner,omitempty"`
+	Purpose    *string `json:"purpose,omitempty"`
+	Notes      *string `json:"notes,omitempty"`
+	ExpiresAt  *string `json:"expires_at,omitempty"`
+	AutoDelete *bool   `json:"auto_delete,omitempty"`
+	NoScan     *bool   `json:"no_scan,omitempty"`
+}
+
+// Apply returns m with the set fields of p applied.
+func (p MetaPatch) Apply(m Meta) Meta {
+	if p.Owner != nil {
+		m.Owner = *p.Owner
+	}
+	if p.Purpose != nil {
+		m.Purpose = *p.Purpose
+	}
+	if p.Notes != nil {
+		m.Notes = *p.Notes
+	}
+	if p.ExpiresAt != nil {
+		m.ExpiresAt = *p.ExpiresAt
+	}
+	if p.AutoDelete != nil {
+		m.AutoDelete = *p.AutoDelete
+	}
+	if p.NoScan != nil {
+		m.NoScan = *p.NoScan
+	}
+	return m
+}
+
+// IsZero reports whether m carries no information.
+func (m Meta) IsZero() bool {
+	return m.Owner == "" && m.Purpose == "" && m.Notes == "" && m.ExpiresAt == "" && !m.AutoDelete && !m.NoScan
+}
+
+// Scan is the result of the record connectivity scan.
+type Scan struct {
+	FirstTS   float64  `json:"first_ts"`
+	LastTS    float64  `json:"last_ts"`
+	LastOKTS  *float64 `json:"last_ok_ts"`
+	Reachable int      `json:"reachable"`
+	OpenPorts string   `json:"open_ports"`
+	Detail    string   `json:"detail"`
+	DNSStatus string   `json:"dns_status"`
+	DNSDetail string   `json:"dns_detail"`
+}
+
+// Listing is a record published on the service portal.
+type Listing struct {
+	RecordID    string  `json:"record_id"`
+	Hostname    string  `json:"hostname"`
+	Title       string  `json:"title"`
+	Description string  `json:"description"`
+	Category    string  `json:"category"`
+	URL         *string `json:"url"`
+	SortOrder   int     `json:"sort_order"`
+	Featured    bool    `json:"featured"`
+	Tags        string  `json:"tags"`
+	Icon        string  `json:"icon"`
+	IconFile    *string `json:"icon_file"`
+	CreatedAt   float64 `json:"created_at"`
+	UpdatedAt   float64 `json:"updated_at"`
+}
+
+// EffectiveURL returns the URL the listing links to.
+func (l Listing) EffectiveURL() string {
+	if l.URL != nil && *l.URL != "" {
+		return *l.URL
+	}
+	return "https://" + l.Hostname
+}
+
+// Request is a public subdomain request.
+type Request struct {
+	ID        int64    `json:"id"`
+	Token     string   `json:"-"`
+	TS        float64  `json:"ts"`
+	IP        string   `json:"ip"`
+	Requester string   `json:"requester"`
+	Contact   string   `json:"contact"`
+	Name      string   `json:"name"`
+	Type      string   `json:"type"`
+	Content   string   `json:"content"`
+	Purpose   string   `json:"purpose"`
+	ExpiresAt string   `json:"expires_at"`
+	Status    string   `json:"status"`
+	AdminNote string   `json:"admin_note"`
+	DecidedTS *float64 `json:"decided_ts"`
+	RecordID  *string  `json:"record_id"`
+}
+
+// AuditEntry is one row of the audit log.
+type AuditEntry struct {
+	ID     int64   `json:"id"`
+	TS     float64 `json:"ts"`
+	IP     string  `json:"ip"`
+	Action string  `json:"action"`
+	Target string  `json:"target"`
+	Detail string  `json:"detail"`
+}
