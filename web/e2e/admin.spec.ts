@@ -315,6 +315,22 @@ test('site settings save and image upload', async ({ page }) => {
   await expect(toast(page, '已儲存')).toBeVisible();
 });
 
+test('help tips show above an open dialog on hover and on click', async ({ page }) => {
+  await openRecords(page);
+  await page.getByRole('button', { name: '新增 Record' }).click();
+  const ed = page.getByTestId('record-editor');
+  await ed.locator('label[for=ed-type] .tip-icon').hover();
+  const tip = page.locator('.tooltip');
+  await expect(tip).toBeVisible();
+  await expect(tip).toHaveText('A：指向 IPv4 位址，適用於多數自架服務。');
+  // The tooltip lives inside the modal dialog so the backdrop does not cover it.
+  expect(await tip.evaluate((el) => el.parentElement?.tagName)).toBe('DIALOG');
+  await ed.getByLabel('Type').selectOption('CNAME');
+  await ed.locator('label[for=ed-type] .tip-icon').click();
+  await expect(tip).toContainText('同名不可再有 A、AAAA、CNAME。');
+  await ed.getByRole('button', { name: '取消' }).click();
+});
+
 test('every admin tab renders without errors and without tag styling', async ({ page }) => {
   for (const tab of ['overview', 'records', 'requests', 'snapshots', 'settings', 'audit']) {
     await page.goto('/admin#' + tab);

@@ -26,3 +26,11 @@ export async function seed(request) {
     if (!res.ok()) throw new Error(`listing ${name}: ${res.status()} ${await res.text()}`);
   }
 }
+
+// node e2e/seed.mjs — seed a running dev server.
+if (process.argv[1] && import.meta.url === new URL('file://' + process.argv[1]).href) {
+  const { request } = await import('@playwright/test');
+  const r = await request.newContext();
+  await seed(r);
+  console.log('seeded');
+}

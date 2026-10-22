@@ -13,7 +13,6 @@ import (
 	"github.com/nycu-sdc/sdc-portal/internal/assets"
 	"github.com/nycu-sdc/sdc-portal/internal/dnsrec"
 	"github.com/nycu-sdc/sdc-portal/internal/model"
-	"github.com/nycu-sdc/sdc-portal/internal/store"
 )
 
 type listingOut struct {
@@ -836,17 +835,4 @@ func (s *Server) apiScanOne(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Scanner.ScanSoon(*rec)
 	writeJSON(w, http.StatusAccepted, map[string]any{"started": true})
-}
-
-func (s *Server) recordByID(ctx context.Context, id string) (*model.Record, error) {
-	recs, _, err := s.CF.List(ctx, false)
-	if err != nil {
-		return nil, err
-	}
-	for _, r := range recs {
-		if r.ID == id {
-			return &r, nil
-		}
-	}
-	return nil, store.ErrNotFound
 }

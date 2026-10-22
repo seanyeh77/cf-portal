@@ -1,0 +1,19 @@
+services:
+  portal:
+    build: .
+    image: sdc-portal:latest
+    env_file: .env
+    ports:
+      - "8080:8080"
+    volumes:
+      - portal-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/portal", "health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  portal-data:

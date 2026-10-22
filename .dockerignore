@@ -1,0 +1,10 @@
+.git
+web/node_modules
+web/test-results
+web/playwright-report
+web/screenshots
+web/e2e/.auth.json
+internal/webui/dist/app
+.env
+data
+*.db
