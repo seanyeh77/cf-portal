@@ -76,7 +76,7 @@ func normalizeSetting(k, v string) (string, error) {
 		if err != nil {
 			return "", invalidf(err.Error())
 		}
-		v = joinInts(ports)
+		v = scanner.FormatPorts(ports, ",")
 	case "requests_enabled":
 		if v == "true" {
 			v = "1"
@@ -88,17 +88,9 @@ func normalizeSetting(k, v string) (string, error) {
 	return v, nil
 }
 
-func joinInts(a []int) string {
-	s := make([]string, len(a))
-	for i, n := range a {
-		s[i] = strconv.Itoa(n)
-	}
-	return strings.Join(s, ",")
-}
-
 func (s *Server) apiPutSettings(w http.ResponseWriter, r *http.Request) {
 	var b map[string]any
-	if err := decode(r, &b); err != nil {
+	if err := decode(w, r, &b); err != nil {
 		writeAnyErr(w, err)
 		return
 	}
@@ -211,7 +203,7 @@ func (s *Server) apiSnapshots(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) apiCreateSnapshot(w http.ResponseWriter, r *http.Request) {
-	info, err := s.Maint.Snapshot(r.Context(), "manual")
+	info, _, err := s.Maint.Snapshot(r.Context(), "manual")
 	if err != nil {
 		writeAnyErr(w, err)
 		return

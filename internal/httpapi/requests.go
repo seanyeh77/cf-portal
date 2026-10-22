@@ -30,9 +30,14 @@ func (s *Server) requestPageData(r *http.Request, errs []string, values map[stri
 		"name_rule_hint": set["name_rule_hint"], "errors": errs, "values": values, "today": s.today()}
 }
 
+// writeClosed answers request pages while requests are disabled.
+func (s *Server) writeClosed(w http.ResponseWriter, set map[string]string) {
+	s.writePage(w, http.StatusNotFound, "portal", map[string]any{"page": "closed", "site": s.publicSettings(set)})
+}
+
 func (s *Server) pageRequest(w http.ResponseWriter, r *http.Request) {
-	if s.settings(r.Context())["requests_enabled"] != "1" {
-		s.writePage(w, http.StatusNotFound, "portal", map[string]any{"page": "closed", "site": s.publicSettings(s.settings(r.Context()))})
+	if set := s.settings(r.Context()); set["requests_enabled"] != "1" {
+		s.writeClosed(w, set)
 		return
 	}
 	s.writePage(w, http.StatusOK, "portal", s.requestPageData(r, nil, nil))
@@ -95,7 +100,7 @@ func (s *Server) submitRequest(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	set := s.settings(ctx)
 	if set["requests_enabled"] != "1" {
-		s.writePage(w, http.StatusNotFound, "portal", map[string]any{"page": "closed", "site": s.publicSettings(set)})
+		s.writeClosed(w, set)
 		return
 	}
 	if !sameOrigin(r) {
@@ -169,7 +174,8 @@ func (s *Server) apiRequests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var recs []model.Record
-	rule := s.settings(ctx)["name_rule"]
+	set := s.settings(ctx)
+	rule := set["name_rule"]
 	out := make([]requestOut, 0, len(reqs))
 	for _, q := range reqs {
 		o := requestOut{Request: q, NameOK: true}
@@ -192,7 +198,7 @@ func (s *Server) apiRequests(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, o)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"requests": out, "enabled": s.settings(ctx)["requests_enabled"] == "1"})
+	writeJSON(w, http.StatusOK, map[string]any{"requests": out, "enabled": set["requests_enabled"] == "1"})
 }
 
 func (s *Server) loadRequest(w http.ResponseWriter, r *http.Request) *model.Request {
@@ -223,7 +229,7 @@ func (s *Server) apiApprove(w http.ResponseWriter, r *http.Request) {
 		Meta   *model.Meta        `json:"meta"`
 		Note   string             `json:"note"`
 	}
-	if err := decode(r, &b); err != nil {
+	if err := decode(w, r, &b); err != nil {
 		writeAnyErr(w, err)
 		return
 	}
@@ -231,37 +237,20 @@ func (s *Server) apiApprove(w http.ResponseWriter, r *http.Request) {
 	if b.Record != nil {
 		in = *b.Record
 	}
-	if err := dnsrec.Validate(&in, s.Cfg.CFZoneName); err != nil {
-		writeAnyErr(w, err)
-		return
-	}
 	meta := model.Meta{Owner: q.Requester + "（" + q.Contact + "）", Purpose: q.Purpose, ExpiresAt: q.ExpiresAt}
 	if b.Meta != nil {
 		meta = *b.Meta
 	}
-	meta, err := cleanMeta(meta)
-	if err != nil {
-		writeAnyErr(w, err)
-		return
-	}
-	ctx := r.Context()
-	if err := s.checkConflict(ctx, in, ""); err != nil {
-		writeAnyErr(w, err)
-		return
-	}
-	rec, err := s.CF.Create(ctx, in)
-	if err != nil {
-		writeAnyErr(w, err)
-		return
-	}
-	s.Store.PutMeta(ctx, rec.ID, meta)
 	note := trimLen(b.Note, 500)
-	if err := s.Store.DecideRequest(ctx, q.ID, "approved", note, &rec.ID); err != nil && !errors.Is(err, store.ErrNotFound) {
+	rec, _, err := s.createRecord(r, in, meta, "request_approve", map[string]any{"request_id": q.ID, "note": note})
+	if err != nil {
 		writeAnyErr(w, err)
 		return
 	}
-	s.auditLog(r, "request_approve", rec.Name, map[string]any{"record_id": rec.ID, "request_id": q.ID, "after": rec.Input(), "meta": meta, "note": note})
-	s.Scanner.ScanSoon(*rec)
+	if err := s.Store.DecideRequest(r.Context(), q.ID, "approved", note, &rec.ID); err != nil && !errors.Is(err, store.ErrNotFound) {
+		writeAnyErr(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"record": rec})
 }
 
@@ -273,7 +262,7 @@ func (s *Server) apiReject(w http.ResponseWriter, r *http.Request) {
 	var b struct {
 		Note string `json:"note"`
 	}
-	if err := decode(r, &b); err != nil {
+	if err := decode(w, r, &b); err != nil {
 		writeAnyErr(w, err)
 		return
 	}

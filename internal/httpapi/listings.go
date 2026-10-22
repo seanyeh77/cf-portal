@@ -87,7 +87,7 @@ func cleanListing(b listingBody) (listingBody, error) {
 func (s *Server) apiPutListing(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var b listingBody
-	if err := decode(r, &b); err != nil {
+	if err := decode(w, r, &b); err != nil {
 		writeAnyErr(w, err)
 		return
 	}

@@ -170,12 +170,13 @@ export function FloatingMenu({
     const down = (e: MouseEvent) => {
       if (!ref.current?.contains(e.target as Node) && !anchor.contains(e.target as Node)) onClose();
     };
-    // Scrolling that started before the menu opened (e.g. scrolling the
-    // button into view) must not close it.
-    const openedAt = performance.now();
+    // Close only when the anchor actually moved: a scroll event fired by
+    // scrolling the button into view before opening must not close it.
+    const start = anchor.getBoundingClientRect();
     const scroll = (e: Event) => {
-      if (performance.now() - openedAt < 200) return;
-      if (!ref.current?.contains(e.target as Node)) onClose();
+      if (ref.current?.contains(e.target as Node)) return;
+      const now = anchor.getBoundingClientRect();
+      if (Math.abs(now.top - start.top) > 1 || Math.abs(now.left - start.left) > 1) onClose();
     };
     const key = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -239,28 +240,43 @@ export function FloatingMenu({
 
 // ---- toasts ----
 
-/** Shows a message at the bottom centre; errors stay longer and are red. */
-export function toast(msg: string, opts: { error?: boolean } = {}) {
-  // Placed after the current render so a dialog that is closing in the same
-  // step does not take the toast with it.
-  window.setTimeout(() => showToast(msg, opts), 40);
+let toastBox: HTMLDivElement | null = null;
+
+function toastHost() {
+  if (!toastBox) {
+    toastBox = document.createElement('div');
+    toastBox.className = 'toasts';
+    toastBox.setAttribute('role', 'status');
+    toastBox.setAttribute('aria-live', 'polite');
+    // Keep the box in the top-most layer: inside the open modal dialog (so
+    // the backdrop does not cover it), back in <body> when that dialog closes.
+    onLayerChange(() => {
+      if (toastBox!.parentElement !== topLayer()) topLayer().appendChild(toastBox!);
+    });
+  }
+  if (toastBox.parentElement !== topLayer()) topLayer().appendChild(toastBox);
+  return toastBox;
 }
 
-function showToast(msg: string, opts: { error?: boolean }) {
-  const layer = topLayer();
-  let box = layer.querySelector<HTMLDivElement>(':scope > .toasts');
-  if (!box) {
-    box = document.createElement('div');
-    box.className = 'toasts';
-    box.setAttribute('role', 'status');
-    box.setAttribute('aria-live', 'polite');
-    layer.appendChild(box);
-  }
+/** Shows a message at the bottom centre; errors stay longer and are red. */
+export function toast(msg: string, opts: { error?: boolean } = {}) {
   const t = document.createElement('div');
   t.className = 'toast' + (opts.error ? ' error' : '');
   t.textContent = msg;
-  box.appendChild(t);
+  toastHost().appendChild(t);
   window.setTimeout(() => t.remove(), opts.error ? 6000 : 2600);
+}
+
+/** Copies text to the clipboard and reports the outcome in a toast. */
+export function copyText(text: string, okMsg: string) {
+  if (!navigator.clipboard) {
+    toast('無法複製，請手動複製', { error: true });
+    return;
+  }
+  navigator.clipboard.writeText(text).then(
+    () => toast(okMsg),
+    () => toast('無法複製，請手動複製', { error: true }),
+  );
 }
 
 // ---- confirm ----

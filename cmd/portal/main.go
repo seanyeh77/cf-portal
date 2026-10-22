@@ -139,9 +139,11 @@ func serve() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if _, err := cf.ZoneID(ctx); err != nil {
-		log.Printf("warning: cannot reach Cloudflare yet: %v", err)
-	}
+	go func() {
+		if _, err := cf.ZoneID(ctx); err != nil {
+			log.Printf("warning: cannot reach Cloudflare yet: %v", err)
+		}
+	}()
 	go hc.Run(ctx)
 	go sc.Run(ctx)
 	go mt.Run(ctx)

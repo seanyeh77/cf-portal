@@ -4,8 +4,8 @@ import { semesterEnd } from '../../shared/format';
 import { Dialog, Tip, toast } from '../../shared/ui';
 import { CSV_TEMPLATE, csvObjects, truthy } from '../lib/csv';
 import { refreshRecords } from '../lib/data';
-import { sub } from '../lib/records';
-import { closeModal, markPending } from '../lib/store';
+import { REQUEST_TYPES, sub } from '../lib/records';
+import { closeModal } from '../lib/store';
 import type { RecordsData } from '../types';
 
 type Row = {
@@ -120,7 +120,6 @@ export function BatchDialog({ mode: initialMode, data }: { mode: 'rule' | 'csv';
       const res = await api<{ results: Result[]; created: number; ok: number }>('POST', '/api/records/batch', { records: rows, dry_run: dry });
       if (dry) setPreview(res.results);
       else {
-        res.results.forEach((r) => r.record_id && markPending(r.record_id));
         toast(`已建立 ${res.created} 筆`);
         closeModal();
         refreshRecords();
@@ -180,7 +179,7 @@ export function BatchDialog({ mode: initialMode, data }: { mode: 'rule' | 'csv';
           <div className="field">
             <label htmlFor="b-type">Type</label>
             <select id="b-type" className="input" value={type} onChange={(e) => touch(setType)(e.target.value)}>
-              {['A', 'AAAA', 'CNAME', 'TXT'].map((t) => (
+              {REQUEST_TYPES.map((t) => (
                 <option key={t}>{t}</option>
               ))}
             </select>

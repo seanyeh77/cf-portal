@@ -15,8 +15,11 @@ import {
   sub,
   TTL_OPTIONS,
   ttlLabel,
+  DNS_FIELD_LABEL,
+  fieldValue,
+  ownersOf,
 } from '../lib/records';
-import { closeModal, markPending, type EditorFocus } from '../lib/store';
+import { closeModal, type EditorFocus } from '../lib/store';
 import type { DNSRecord, RecordsData } from '../types';
 
 const TYPE_HELP: Record<string, string> = {
@@ -37,13 +40,8 @@ const CONTENT: Record<string, [string, string]> = {
 
 type DNSForm = { type: string; name: string; content: string; ttl: number; proxied: boolean };
 
-const FIELD_LABEL: Record<keyof DNSForm, string> = { type: '類型', name: '名稱', content: '指向', proxied: 'Proxy', ttl: 'TTL' };
-
-function show(k: keyof DNSForm, v: DNSForm[keyof DNSForm]) {
-  if (k === 'proxied') return v ? '啟用' : '停用';
-  if (k === 'ttl') return ttlLabel(v as number);
-  return String(v);
-}
+/** Fields whose change needs the confirmation dialog. */
+const CONFIRM_FIELDS: (keyof DNSForm)[] = ['type', 'name', 'content', 'proxied', 'ttl'];
 
 export function RecordEditor({ record, data, focus }: { record?: DNSRecord; data: RecordsData; focus?: EditorFocus }) {
   const zone = data.zone;
@@ -85,10 +83,11 @@ export function RecordEditor({ record, data, focus }: { record?: DNSRecord; data
   const nameChanged = !record || normTarget(record.name) !== fullName;
   const ruleErr = nameRuleError(name, zone, data.settings.name_rule);
   const others = data.records.filter((r) => r.id !== record?.id && normTarget(r.name) === fullName);
-  const owners = useMemo(() => Array.from(new Set(data.records.map((r) => r.meta.owner).filter(Boolean))).sort(), [data.records]);
+  const owners = useMemo(() => ownersOf(data.records), [data.records]);
 
   const warnings: string[] = [];
-  const cnameClash = others.find((o) => (type === 'CNAME' && ['A', 'AAAA', 'CNAME'].includes(o.type)) || (o.type === 'CNAME' && ['A', 'AAAA', 'CNAME'].includes(type)));
+  // A CNAME cannot share its name with A, AAAA or CNAME (the scannable set).
+  const cnameClash = others.find((o) => (type === 'CNAME' && SCANNABLE.has(o.type)) || (o.type === 'CNAME' && SCANNABLE.has(type)));
   if (cnameClash) warnings.push(`${fullName} 已有 ${cnameClash.type} record，CNAME 不可與其他 record 同名。`);
   const sameType = others.filter((o) => o.type === type);
   if (sameType.length && !cnameClash) {
@@ -119,14 +118,11 @@ export function RecordEditor({ record, data, focus }: { record?: DNSRecord; data
       comment,
       meta,
     };
-    let dnsChanged = isNew;
     if (record) {
       const before: DNSForm = { type: record.type, name: normTarget(record.name), content: record.content, ttl: record.ttl, proxied: record.proxied };
-      const changes = (Object.keys(FIELD_LABEL) as (keyof DNSForm)[]).filter((k) =>
+      const changes = CONFIRM_FIELDS.filter((k) =>
         k === 'name' ? before.name !== form.name : k === 'content' ? normTarget(String(before.content)) !== normTarget(form.content) : before[k] !== form[k],
       );
-      const otherDNS = (record.priority ?? null) !== (body.priority ?? null) || record.comment !== comment;
-      dnsChanged = changes.length > 0 || otherDNS;
       if (changes.length > 0) {
         const reasons: string[] = [];
         if (before.proxied && !form.proxied && ['A', 'AAAA'].includes(form.type) && isPublicIP(form.content)) reasons.push('停用 Proxy 後，來源主機的 IP 會公開。');
@@ -141,11 +137,7 @@ export function RecordEditor({ record, data, focus }: { record?: DNSRecord; data
           danger: risky,
           width: 560,
           body: (
-            <DiffTable
-              reasons={reasons}
-              rows={changes.map((k) => [FIELD_LABEL[k], show(k, before[k]), show(k, form[k])])}
-              risky={risky}
-            />
+            <DiffTable reasons={reasons} rows={changes.map((k) => [DNS_FIELD_LABEL[k], fieldValue(k, before[k]), fieldValue(k, form[k])])} />
           ),
         });
         if (!ok) return;
@@ -153,16 +145,11 @@ export function RecordEditor({ record, data, focus }: { record?: DNSRecord; data
     }
     setBusy(true);
     try {
-      let id = record?.id;
-      if (isNew) {
-        const res = await api<{ record: { id: string } }>('POST', '/api/records', body);
-        id = res.record.id;
-      } else {
-        await api('PATCH', `/api/records/${record!.id}`, body);
-      }
-      const willScan = SCANNABLE.has(type) && !noScan && dnsChanged;
-      if (willScan && id) markPending(id);
-      toast(isNew ? (willScan ? '已新增，連線檢查中' : '已新增') : willScan ? '已儲存，連線檢查中' : '已儲存');
+      // The server reports whether it queued a connection check.
+      const res = isNew
+        ? await api<{ scanning: boolean }>('POST', '/api/records', body)
+        : await api<{ scanning: boolean }>('PATCH', `/api/records/${record!.id}`, body);
+      toast((isNew ? '已新增' : '已儲存') + (res.scanning ? '，連線檢查中' : ''));
       closeModal();
       await refreshRecords();
     } catch (e) {
@@ -363,7 +350,8 @@ export function RecordEditor({ record, data, focus }: { record?: DNSRecord; data
   );
 }
 
-export function DiffTable({ rows, reasons, risky }: { rows: [string, string, string][]; reasons: string[]; risky: boolean }): ReactNode {
+function DiffTable({ rows, reasons }: { rows: [string, string, string][]; reasons: string[] }): ReactNode {
+  const risky = reasons.length > 0;
   return (
     <>
       {reasons.length > 0 && (

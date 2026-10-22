@@ -1,8 +1,8 @@
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Fragment, memo, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api, errMsg } from '../../shared/api';
 import { addMonth, relTime, semesterEnd } from '../../shared/format';
 import { MenuButton, Tip, toast, type MenuItem } from '../../shared/ui';
-import { refreshRecords, useRecords } from '../lib/data';
+import { act, pendingIds, refreshRecords, useRecords } from '../lib/data';
 import {
   describeFilters,
   dotState,
@@ -20,7 +20,6 @@ import {
   statusIssues,
   sub,
   syncedTip,
-  targetKey,
   type Filters,
   type SortKey,
 } from '../lib/records';
@@ -28,7 +27,6 @@ import {
   modalStore,
   openDrawer,
   openEditor,
-  pendingStore,
   selectionStore,
   setFilters,
   useStore,
@@ -43,17 +41,9 @@ export function Records() {
   return <RecordsView data={data} />;
 }
 
-async function saveMeta(id: string, patch: Record<string, unknown>, msg: string) {
-  try {
-    await api('PUT', `/api/records/${id}/meta`, patch);
-    toast(msg);
-    await refreshRecords();
-  } catch (e) {
-    toast(errMsg(e), { error: true });
-  }
-}
+const saveMeta = (id: string, patch: Record<string, unknown>, msg: string) => act(() => api('PUT', `/api/records/${id}/meta`, patch), msg);
 
-export function extendItems(r: DNSRecord, today: string): MenuItem[] {
+function extendItems(r: DNSRecord, today: string): MenuItem[] {
   const cur = r.meta.expires_at;
   const base = cur && cur > today ? cur : today;
   return [
@@ -65,16 +55,20 @@ export function extendItems(r: DNSRecord, today: string): MenuItem[] {
   ];
 }
 
-const FIX_LINK: Record<string, [string, (r: DNSRecord, i: Issue) => void, boolean]> = {
-  bad_target: ['編輯目標', (r) => openEditor(r.id, 'content'), true],
-  dangling: ['編輯目標', (r) => openEditor(r.id, 'content'), true],
-  unclaimed: ['編輯目標', (r) => openEditor(r.id, 'content'), true],
-  loopback: ['編輯目標', (r) => openEditor(r.id, 'content'), true],
-  upstream_broken: ['前往上游', (_, i) => i.upstream && openDrawer(i.upstream), false],
-  proxied_private: ['編輯 Proxy', (r) => openEditor(r.id, 'proxied'), true],
-  name_rule: ['編輯名稱', (r) => openEditor(r.id, 'name'), true],
-  unproxied_web: ['編輯', (r) => openEditor(r.id), true],
-  zombie: ['停用檢查', (r) => saveMeta(r.id, { no_scan: true }, '已停用連線檢查'), false],
+type Fix = { label: string; run: (r: DNSRecord, i: Issue) => void; needsEditor: boolean };
+const editTarget: Fix = { label: '編輯目標', run: (r) => openEditor(r.id, 'content'), needsEditor: true };
+
+/** One-click fixes shown after the top issue in the status column. */
+const FIX_LINK: Record<string, Fix> = {
+  bad_target: editTarget,
+  dangling: editTarget,
+  unclaimed: editTarget,
+  loopback: editTarget,
+  upstream_broken: { label: '前往上游', run: (_, i) => i.upstream && openDrawer(i.upstream), needsEditor: false },
+  proxied_private: { label: '編輯 Proxy', run: (r) => openEditor(r.id, 'proxied'), needsEditor: true },
+  name_rule: { label: '編輯名稱', run: (r) => openEditor(r.id, 'name'), needsEditor: true },
+  unproxied_web: { label: '編輯', run: (r) => openEditor(r.id), needsEditor: true },
+  zombie: { label: '停用檢查', run: (r) => saveMeta(r.id, { no_scan: true }, '已停用連線檢查'), needsEditor: false },
 };
 
 function StatusCell({ r, pending }: { r: DNSRecord; pending: boolean }) {
@@ -100,9 +94,9 @@ function StatusCell({ r, pending }: { r: DNSRecord; pending: boolean }) {
               等 {rest.length} 項
             </span>
           )}
-          {fix && (fix[2] ? r.editable : true) && (
-            <button type="button" className="linkbtn fix" onClick={() => fix[1](r, top)}>
-              {fix[0]}
+          {fix && (!fix.needsEditor || r.editable) && (
+            <button type="button" className="linkbtn fix" onClick={() => fix.run(r, top)}>
+              {fix.label}
             </button>
           )}
         </div>
@@ -155,16 +149,21 @@ function useNow(interval = 30000) {
   return now;
 }
 
-function Row({
+/** One table row. Memoized: polling keeps unchanged record objects stable. */
+const Row = memo(function Row({
   r,
-  data,
+  zone,
+  today,
+  warn,
   selected,
   pending,
   showExpiry,
   now,
 }: {
   r: DNSRecord;
-  data: RecordsData;
+  zone: string;
+  today: string;
+  warn: number;
   selected: boolean;
   pending: boolean;
   showExpiry: boolean;
@@ -172,9 +171,8 @@ function Row({
 }) {
   const lv = rowLevel(r);
   const dot = dotState(r, pending, now);
-  const s = sub(r.name, data.zone);
+  const s = sub(r.name, zone);
   const unassigned = !r.meta.owner.trim();
-  const warn = +data.settings.expiry_warn_days || 14;
   const metaLine = [r.meta.purpose, r.meta.owner].filter(Boolean).join(' · ');
   const menu: MenuItem[] = [
     { label: '詳細資料', onClick: () => openDrawer(r.id) },
@@ -212,7 +210,7 @@ function Row({
       <td className="c-name">
         <div className="name-line">
           <span className="mono name-sub">{s}</span>
-          {s !== '@' && <span className="mono zone-suffix">.{data.zone}</span>}
+          {s !== '@' && <span className="mono zone-suffix">.{zone}</span>}
         </div>
         <div className="meta-line small">
           {unassigned ? (
@@ -254,7 +252,7 @@ function Row({
       </td>
       {showExpiry && (
         <td className="c-expiry">
-          <ExpiryCell r={r} today={data.today} warn={warn} />
+          <ExpiryCell r={r} today={today} warn={warn} />
         </td>
       )}
       <td className="c-actions">
@@ -273,19 +271,20 @@ function Row({
       </td>
     </tr>
   );
-}
+});
 
 function RecordsView({ data }: { data: RecordsData }) {
   const view = useStore(viewStore);
   const selection = useStore(selectionStore);
-  const pending = useStore(pendingStore);
+  const pending = useMemo(() => pendingIds(data), [data]);
   const now = useNow();
+  const warn = +data.settings.expiry_warn_days || 14;
   const f = view.filters;
   const zone = data.zone;
 
-  const base = useMemo(() => data.records.filter((r) => matches(r, f, data.today, true)), [data, f]);
+  const base = useMemo(() => data.records.filter((r) => matches(r, f)), [data, f]);
   const filtered = useMemo(() => base.filter((r) => !f.severity || rowLevel(r) === f.severity), [base, f.severity]);
-  const sorted = useMemo(() => sortRecords(filtered, view.sort, zone, data.today), [filtered, view.sort, zone, data.today]);
+  const sorted = useMemo(() => sortRecords(filtered, view.sort, zone), [filtered, view.sort, zone]);
   const counts = useMemo(() => {
     const c = { all: base.length, high: 0, medium: 0, low: 0 };
     for (const r of base) {
@@ -299,7 +298,8 @@ function RecordsView({ data }: { data: RecordsData }) {
   const types = Array.from(new Set(data.records.map((r) => r.type))).sort();
   const desc = describeFilters(f, data);
   const anyFilter = desc.length > 0;
-  const selectedIds = Array.from(selection).filter((id) => data.records.some((r) => r.id === id));
+  const allIds = useMemo(() => new Set(data.records.map((r) => r.id)), [data.records]);
+  const selectedIds = Array.from(selection).filter((id) => allIds.has(id));
   const allChecked = sorted.length > 0 && sorted.every((r) => selection.has(r.id));
 
   // Clear selections of records that no longer exist.
@@ -319,7 +319,7 @@ function RecordsView({ data }: { data: RecordsData }) {
     const by = new Map<string, DNSRecord[]>();
     const other: DNSRecord[] = [];
     for (const r of sorted) {
-      const k = targetKey(r);
+      const k = r.target_key;
       if (k && data.targets[k]) {
         if (!by.has(k)) by.set(k, []);
         by.get(k)!.push(r);
@@ -330,7 +330,17 @@ function RecordsView({ data }: { data: RecordsData }) {
   }, [view.byTarget, sorted, data.targets]);
 
   const renderRow = (r: DNSRecord) => (
-    <Row key={r.id} r={r} data={data} selected={selection.has(r.id)} pending={r.id in pending} showExpiry={showExpiry} now={now} />
+    <Row
+      key={r.id}
+      r={r}
+      zone={zone}
+      today={data.today}
+      warn={warn}
+      selected={selection.has(r.id)}
+      pending={pending.has(r.id)}
+      showExpiry={showExpiry}
+      now={now}
+    />
   );
 
   return (
@@ -457,15 +467,7 @@ function RecordsView({ data }: { data: RecordsData }) {
                 <button
                   type="button"
                   className="btn small"
-                  onClick={async () => {
-                    try {
-                      await api('DELETE', `/api/listings/${o.record_id}`);
-                      toast('已下架');
-                      refreshRecords();
-                    } catch (e) {
-                      toast(errMsg(e), { error: true });
-                    }
-                  }}
+                  onClick={() => act(() => api('DELETE', `/api/listings/${o.record_id}`), '已下架')}
                 >
                   下架
                 </button>
@@ -606,12 +608,4 @@ function RecordsView({ data }: { data: RecordsData }) {
   );
 }
 
-async function bulkSet(ids: string[], set: Record<string, unknown>, msg: string) {
-  try {
-    await api('POST', '/api/records/bulk-meta', { ids, set });
-    toast(msg);
-    refreshRecords();
-  } catch (e) {
-    toast(errMsg(e), { error: true });
-  }
-}
+const bulkSet = (ids: string[], set: Record<string, unknown>, msg: string) => act(() => api('POST', '/api/records/bulk-meta', { ids, set }), msg);

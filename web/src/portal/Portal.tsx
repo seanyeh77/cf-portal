@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { fmtHM, pct } from '../shared/format';
 import { getTheme, nextTheme, setTheme, themeLabel, type ThemeChoice } from '../shared/theme';
-import { Dialog, toast } from '../shared/ui';
+import { copyText, Dialog } from '../shared/ui';
 import { fuzzy, neighbour } from './fuzzy';
 
 export type Site = {
@@ -417,12 +417,7 @@ export function Portal({ init }: { init: PortalInit }) {
     window.open(s.url, '_blank', 'noopener');
   }, []);
 
-  const copy = useCallback((s: Service) => {
-    navigator.clipboard?.writeText(s.url).then(
-      () => toast(`已複製 ${s.url}`),
-      () => toast('無法複製', { error: true }),
-    );
-  }, []);
+  const copy = useCallback((s: Service) => copyText(s.url, `已複製 ${s.url}`), []);
 
   const cycleCategory = useCallback(
     (d: number) => {

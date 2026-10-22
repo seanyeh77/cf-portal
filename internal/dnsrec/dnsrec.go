@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/nycu-sdc/sdc-portal/internal/model"
 )
@@ -203,6 +204,24 @@ func Conflict(in model.RecordInput, existing []model.Record, excludeID string) e
 	return nil
 }
 
+var ruleCache sync.Map // rule string → compiled rule (or error)
+
+type compiled struct {
+	re  *regexp.Regexp
+	err error
+}
+
+// compileRule compiles a custom naming rule anchored to the whole name,
+// once per distinct rule.
+func compileRule(rule string) (*regexp.Regexp, error) {
+	if c, ok := ruleCache.Load(rule); ok {
+		return c.(compiled).re, c.(compiled).err
+	}
+	re, err := regexp.Compile("^(?:" + rule + ")$")
+	ruleCache.Store(rule, compiled{re, err})
+	return re, err
+}
+
 var labelRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 
 // NameRuleError returns why name breaks the naming rule, or "".
@@ -226,7 +245,7 @@ func NameRuleError(name, zone, rule string) string {
 		}
 	}
 	if rule != "" && !hasUnderscore {
-		re, err := regexp.Compile("^(?:" + rule + ")$")
+		re, err := compileRule(rule)
 		if err == nil && !re.MatchString(rel) {
 			return fmt.Sprintf("「%s」不符合自訂命名規則", rel)
 		}

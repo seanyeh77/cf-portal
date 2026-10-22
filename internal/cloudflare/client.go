@@ -43,6 +43,9 @@ type Client struct {
 	zoneID   string
 	cache    []model.Record
 	cachedAt time.Time
+	// gen increases on every write, so a List that started before a
+	// write never stores its (stale) result.
+	gen uint64
 }
 
 // New returns a client. zoneID may be empty.
@@ -143,6 +146,7 @@ const cacheTTL = 15 * time.Second
 func (c *Client) Invalidate() {
 	c.mu.Lock()
 	c.cache = nil
+	c.gen++
 	c.mu.Unlock()
 }
 
@@ -156,6 +160,7 @@ func (c *Client) List(ctx context.Context, fresh bool) ([]model.Record, time.Tim
 		c.mu.Unlock()
 		return out, at, nil
 	}
+	gen := c.gen
 	c.mu.Unlock()
 	zid, err := c.ZoneID(ctx)
 	if err != nil {
@@ -178,8 +183,10 @@ func (c *Client) List(ctx context.Context, fresh bool) ([]model.Record, time.Tim
 	}
 	now := time.Now()
 	c.mu.Lock()
-	c.cache = append([]model.Record(nil), all...)
-	c.cachedAt = now
+	if c.gen == gen {
+		c.cache = append([]model.Record(nil), all...)
+		c.cachedAt = now
+	}
 	c.mu.Unlock()
 	return all, now, nil
 }

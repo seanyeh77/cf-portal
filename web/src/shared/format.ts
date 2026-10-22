@@ -1,12 +1,3 @@
-const dtf = new Intl.DateTimeFormat('zh-TW', {
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-  hourCycle: 'h23',
-});
 const dtfShort = new Intl.DateTimeFormat('zh-TW', {
   year: 'numeric',
   month: '2-digit',
@@ -17,10 +8,6 @@ const dtfShort = new Intl.DateTimeFormat('zh-TW', {
 });
 const hm = new Intl.DateTimeFormat('zh-TW', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 
-/** 2026/10/22 21:54:03 */
-export function fmtDateTime(ts: number) {
-  return dtf.format(new Date(ts * 1000));
-}
 /** 2026/10/22 21:54 */
 export function fmtDateTimeShort(ts: number) {
   return dtfShort.format(new Date(ts * 1000));

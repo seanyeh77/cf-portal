@@ -3,14 +3,13 @@ package health
 
 import (
 	"context"
-	"crypto/tls"
 	"io"
 	"log"
 	"net/http"
 	"sync"
 	"time"
 
-	"github.com/nycu-sdc/sdc-portal/internal/assets"
+	"github.com/nycu-sdc/sdc-portal/internal/httpclient"
 	"github.com/nycu-sdc/sdc-portal/internal/model"
 	"github.com/nycu-sdc/sdc-portal/internal/store"
 )
@@ -31,9 +30,7 @@ type Checker struct {
 
 // New returns a checker.
 func New(st *store.Store, interval, timeout time.Duration, verifyTLS bool) *Checker {
-	tr := http.DefaultTransport.(*http.Transport).Clone()
-	tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: !verifyTLS} //nolint:gosec // configurable for self-signed hosts
-	return &Checker{Store: st, Interval: interval, client: &http.Client{Timeout: timeout, Transport: tr, CheckRedirect: assets.LimitRedirects}}
+	return &Checker{Store: st, Interval: interval, client: httpclient.New(timeout, verifyTLS, httpclient.LimitRedirects)}
 }
 
 // Check performs one check and stores the result.
@@ -122,8 +119,8 @@ type LastCheck struct {
 	Status int     `json:"status"`
 }
 
-// Summaries summarizes checks for all listings.
-func (c *Checker) Summaries(ctx context.Context, now time.Time) (map[string]Summary, error) {
+// Summaries summarizes checks for the given listings (all listings if nil).
+func (c *Checker) Summaries(ctx context.Context, now time.Time, ls []model.Listing) (map[string]Summary, error) {
 	start := now.Truncate(bucketSize).Add(-(bucketCount - 1) * bucketSize)
 	from := now.Add(-24 * time.Hour)
 	if start.Before(from) {
@@ -133,9 +130,10 @@ func (c *Checker) Summaries(ctx context.Context, now time.Time) (map[string]Summ
 	if err != nil {
 		return nil, err
 	}
-	ls, err := c.Store.Listings(ctx)
-	if err != nil {
-		return nil, err
+	if ls == nil {
+		if ls, err = c.Store.Listings(ctx); err != nil {
+			return nil, err
+		}
 	}
 	out := map[string]Summary{}
 	for _, l := range ls {

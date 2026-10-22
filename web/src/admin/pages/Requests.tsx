@@ -4,8 +4,7 @@ import { api, errMsg } from '../../shared/api';
 import { fmtDateTimeShort } from '../../shared/format';
 import { Dialog, Tip, toast } from '../../shared/ui';
 import { refreshRecords, useRecords } from '../lib/data';
-import { isPrivateIP, PROXIABLE, sub } from '../lib/records';
-import { markPending } from '../lib/store';
+import { isPrivateIP, PROXIABLE, REQUEST_TYPES, sub } from '../lib/records';
 import type { RecordsData, RequestItem } from '../types';
 
 type Resp = { requests: RequestItem[]; enabled: boolean };
@@ -104,12 +103,11 @@ function ApproveDialog({ req, data, onClose, onDone }: { req: RequestItem; data:
     setBusy(true);
     setError('');
     try {
-      const res = await api<{ record: { id: string } }>('POST', `/api/requests/${req.id}/approve`, {
+      await api('POST', `/api/requests/${req.id}/approve`, {
         record: { type, name, content, ttl: 1, proxied: proxied && PROXIABLE.has(type), priority: null, comment: '' },
         meta: { owner, purpose, notes: '', expires_at: expires, auto_delete: false, no_scan: false },
         note,
       });
-      markPending(res.record.id);
       toast('已核准，連線檢查中');
       onClose();
       onDone();
@@ -145,7 +143,7 @@ function ApproveDialog({ req, data, onClose, onDone }: { req: RequestItem; data:
         <div className="field">
           <label htmlFor="ap-type">Type</label>
           <select id="ap-type" className="input" value={type} onChange={(e) => setType(e.target.value)}>
-            {['A', 'AAAA', 'CNAME', 'TXT'].map((t) => (
+            {REQUEST_TYPES.map((t) => (
               <option key={t}>{t}</option>
             ))}
           </select>

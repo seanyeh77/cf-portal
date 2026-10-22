@@ -1,6 +1,8 @@
 // Package model holds the plain data types shared across packages.
 package model
 
+import "strings"
+
 // Record is a Cloudflare DNS record.
 type Record struct {
 	ID         string `json:"id"`
@@ -144,4 +146,39 @@ type AuditEntry struct {
 	Action string  `json:"action"`
 	Target string  `json:"target"`
 	Detail string  `json:"detail"`
+}
+
+func priority(p *int) int {
+	if p == nil {
+		return -1
+	}
+	return *p
+}
+
+// ChangedFields lists the fields that differ between a and b, by JSON name.
+// Names compare case-insensitively, as DNS does.
+func ChangedFields(a, b RecordInput) []string {
+	var f []string
+	if a.Type != b.Type {
+		f = append(f, "type")
+	}
+	if !strings.EqualFold(a.Name, b.Name) {
+		f = append(f, "name")
+	}
+	if a.Content != b.Content {
+		f = append(f, "content")
+	}
+	if a.TTL != b.TTL {
+		f = append(f, "ttl")
+	}
+	if a.Proxied != b.Proxied {
+		f = append(f, "proxied")
+	}
+	if priority(a.Priority) != priority(b.Priority) {
+		f = append(f, "priority")
+	}
+	if a.Comment != b.Comment {
+		f = append(f, "comment")
+	}
+	return f
 }

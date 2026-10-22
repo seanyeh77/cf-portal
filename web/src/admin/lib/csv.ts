@@ -35,9 +35,10 @@ export function parseCSV(text: string): string[][] {
   return rows.filter((r) => r.some((c) => c.trim() !== ''));
 }
 
-/** Undoes the "'" the export adds in front of formula-like cells. */
+/** Undoes the "'" the export adds in front of formula-like cells
+ * (internal/httpapi/export.go cell()). */
 export function unescapeCell(v: string) {
-  return /^'[=+\-@\t\r]/.test(v) ? v.slice(1) : v;
+  return /^'[=+\-@\t\r']/.test(v) ? v.slice(1) : v;
 }
 
 /** Rows as objects keyed by the (lowercase) header. */

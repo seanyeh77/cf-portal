@@ -4,7 +4,6 @@ package scanner
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,6 +19,7 @@ import (
 
 	"github.com/nycu-sdc/sdc-portal/internal/cloudflare"
 	"github.com/nycu-sdc/sdc-portal/internal/dnsrec"
+	"github.com/nycu-sdc/sdc-portal/internal/httpclient"
 	"github.com/nycu-sdc/sdc-portal/internal/model"
 	"github.com/nycu-sdc/sdc-portal/internal/store"
 )
@@ -73,6 +74,8 @@ type Status struct {
 	Error    string  `json:"error"`
 	DNSOK    bool    `json:"dns_ok"`
 	Interval int     `json:"interval"`
+	// Pending lists records with a single-record scan in progress.
+	Pending []string `json:"pending"`
 }
 
 // Scanner scans records.
@@ -88,18 +91,17 @@ type Scanner struct {
 	// HTTPBase overrides https://<name> for tests.
 	HTTPBase func(name, scheme string) string
 
-	http *http.Client
-	mu   sync.Mutex
-	st   Status
+	http     *http.Client
+	mu       sync.Mutex
+	st       Status
+	inflight map[string]bool
 }
 
 // New returns a scanner.
 func New(cf *cloudflare.Client, st *store.Store, timeout, interval time.Duration, canary string, ports func(context.Context) []int) *Scanner {
-	tr := http.DefaultTransport.(*http.Transport).Clone()
-	tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // probing only, never trusting content
-	httpTimeout := max(timeout*2, 5*time.Second)
+	// Probes never trust content, so certificates are not verified.
 	return &Scanner{CF: cf, Store: st, Resolver: net.DefaultResolver, Timeout: timeout, Canary: canary, Interval: interval, Ports: ports,
-		http: &http.Client{Timeout: httpTimeout, Transport: tr, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
+		http: httpclient.New(max(timeout*2, 5*time.Second), false, httpclient.NoRedirects),
 		st:   Status{DNSOK: true, Interval: int(interval.Seconds())}}
 }
 
@@ -107,7 +109,13 @@ func New(cf *cloudflare.Client, st *store.Store, timeout, interval time.Duration
 func (s *Scanner) Status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.st
+	st := s.st
+	st.Pending = make([]string, 0, len(s.inflight))
+	for id := range s.inflight {
+		st.Pending = append(st.Pending, id)
+	}
+	sort.Strings(st.Pending)
+	return st
 }
 
 // Eligible reports whether r is scanned.
@@ -225,17 +233,55 @@ func (s *Scanner) scanAll(ctx context.Context) (int, bool, error) {
 	return n, dnsOK, nil
 }
 
-// ScanSoon scans one record in the background.
-func (s *Scanner) ScanSoon(r model.Record) {
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel()
-		m, _ := s.Store.Meta(ctx, r.ID)
-		if !Eligible(r, m) {
-			return
+// ScanSoon scans the given records in the background and returns the ids
+// actually queued (records that are scannable and not excluded by meta).
+// Queued ids show up in Status().Pending until their result is stored.
+func (s *Scanner) ScanSoon(recs ...model.Record) []string {
+	meta, err := s.Store.AllMeta(context.Background())
+	if err != nil {
+		log.Printf("scanner: %v", err)
+		return nil
+	}
+	var queue []model.Record
+	s.mu.Lock()
+	if s.inflight == nil {
+		s.inflight = map[string]bool{}
+	}
+	for _, r := range recs {
+		if Eligible(r, meta[r.ID]) {
+			queue = append(queue, r)
+			s.inflight[r.ID] = true
 		}
-		s.scanAndStore(ctx, r, s.Ports(ctx), s.dnsWorks(ctx))
+	}
+	s.mu.Unlock()
+	if len(queue) == 0 {
+		return nil
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		ports, dnsOK := s.Ports(ctx), s.dnsWorks(ctx)
+		sem := make(chan struct{}, concurrency)
+		var wg sync.WaitGroup
+		for _, r := range queue {
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(r model.Record) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				s.scanAndStore(ctx, r, ports, dnsOK)
+				s.mu.Lock()
+				delete(s.inflight, r.ID)
+				s.mu.Unlock()
+			}(r)
+		}
+		wg.Wait()
 	}()
+	ids := make([]string, len(queue))
+	for i, r := range queue {
+		ids[i] = r.ID
+	}
+	return ids
 }
 
 func (s *Scanner) scanAndStore(ctx context.Context, r model.Record, ports []int, dnsOK bool) {
@@ -348,7 +394,8 @@ func (s *Scanner) probeHTTP(ctx context.Context, name string, res *Result) {
 	}
 }
 
-func joinPorts(ps []int, sep string) string {
+// FormatPorts joins ports with sep; the inverse of ParsePorts.
+func FormatPorts(ps []int, sep string) string {
 	s := make([]string, len(ps))
 	for i, p := range ps {
 		s[i] = strconv.Itoa(p)
@@ -383,10 +430,10 @@ func (s *Scanner) probeTCP(ctx context.Context, addr string, ports []int, res *R
 	}
 	if len(openPorts) > 0 {
 		res.Reachable = true
-		res.OpenPorts = joinPorts(openPorts, ",")
-		res.Detail = fmt.Sprintf("%s：埠 %s 有回應", addr, joinPorts(openPorts, "、"))
+		res.OpenPorts = FormatPorts(openPorts, ",")
+		res.Detail = fmt.Sprintf("%s：埠 %s 有回應", addr, FormatPorts(openPorts, "、"))
 	} else {
-		res.Detail = fmt.Sprintf("%s：埠 %s 無回應", addr, joinPorts(ports, "、"))
+		res.Detail = fmt.Sprintf("%s：埠 %s 無回應", addr, FormatPorts(ports, "、"))
 	}
 }
 

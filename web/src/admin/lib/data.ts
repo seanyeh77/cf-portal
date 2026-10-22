@@ -1,40 +1,27 @@
-import { useQuery, useQueryClient, QueryClient } from '@tanstack/react-query';
-import { useEffect } from 'react';
-import { api } from '../../shared/api';
+import { useQuery, QueryClient } from '@tanstack/react-query';
+import { api, errMsg } from '../../shared/api';
+import { toast } from '../../shared/ui';
 import type { RecordsData } from '../types';
-import { clearPending, pendingStore, useStore } from './store';
 
 export const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false, staleTime: 5000 } },
 });
 
-/** All records with analysis. Polls faster while checks are pending. */
+/** All records with analysis. Polls faster while the server is checking. */
 export function useRecords() {
-  const pending = useStore(pendingStore);
-  const waiting = Object.keys(pending).length > 0;
-  const q = useQuery({
+  return useQuery({
     queryKey: ['records'],
     queryFn: () => api<RecordsData>('GET', '/api/records'),
-    refetchInterval: (query) => (waiting || query.state.data?.scan.running ? 3000 : 60000),
+    refetchInterval: (query) => {
+      const scan = query.state.data?.scan;
+      return scan && (scan.running || scan.pending.length > 0) ? 3000 : 60000;
+    },
   });
-  const data = q.data;
-  useEffect(() => {
-    if (!data) return;
-    const done: string[] = [];
-    const now = Date.now() / 1000;
-    for (const [id, since] of Object.entries(pending)) {
-      const r = data.records.find((x) => x.id === id);
-      const ready = !r || (r.scan && r.scan.last_ts >= since) || r.meta.no_scan || !['A', 'AAAA', 'CNAME'].includes(r.type);
-      if (ready || now - since > 180) done.push(id);
-    }
-    clearPending(done);
-  }, [data, pending]);
-  return q;
 }
 
-export function useRefresh() {
-  const qc = useQueryClient();
-  return () => qc.invalidateQueries();
+/** Ids whose connection check the server is still running. */
+export function pendingIds(data: RecordsData) {
+  return new Set(data.scan.pending);
 }
 
 export async function refreshRecords(fresh = false) {
@@ -43,4 +30,21 @@ export async function refreshRecords(fresh = false) {
     queryClient.setQueryData(['records'], d);
   }
   await queryClient.invalidateQueries();
+}
+
+/**
+ * Runs a mutation: on success shows okMsg (if any) and refreshes all data;
+ * on failure shows the error. Resolves to the result, or undefined on error.
+ */
+export async function act<T>(fn: () => Promise<T>, okMsg?: string | ((res: T) => string)): Promise<T | undefined> {
+  try {
+    const res = await fn();
+    const msg = typeof okMsg === 'function' ? okMsg(res) : okMsg;
+    if (msg) toast(msg);
+    await refreshRecords();
+    return res;
+  } catch (e) {
+    toast(errMsg(e), { error: true });
+    return undefined;
+  }
 }

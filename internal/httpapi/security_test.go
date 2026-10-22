@@ -181,3 +181,13 @@ func TestServeFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestOversizedBody(t *testing.T) {
+	e := newEnv(t)
+	e.login()
+	big := map[string]string{"notes": strings.Repeat("x", maxJSONBody)}
+	w := e.do("PUT", "/api/records/x/meta", big)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized body: %d %s", w.Code, w.Body.String())
+	}
+}

@@ -4,7 +4,6 @@ package assets
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/nycu-sdc/sdc-portal/internal/httpclient"
 )
 
 // NameRe matches the file names this system serves.
@@ -49,6 +50,11 @@ func Sniff(b []byte) string {
 	return ""
 }
 
+var (
+	svgProlog  = regexp.MustCompile(`(?s)<\?xml.*?\?>|<!--.*?-->|<!doctype[^>]*>`)
+	unsafeName = regexp.MustCompile(`[^A-Za-z0-9_-]`)
+)
+
 func isSVG(b []byte) bool {
 	head := b
 	if len(head) > 4096 {
@@ -69,7 +75,7 @@ func isSVG(b []byte) bool {
 	}
 	// Only a prolog (xml declaration, comments, doctype) may precede <svg.
 	pre := low[:idx]
-	pre = regexp.MustCompile(`(?s)<\?xml.*?\?>|<!--.*?-->|<!doctype[^>]*>`).ReplaceAll(pre, nil)
+	pre = svgProlog.ReplaceAll(pre, nil)
 	return len(bytes.TrimSpace(pre)) == 0
 }
 
@@ -83,7 +89,7 @@ func Save(dir, prefix string, data []byte, allowed map[string]bool) (string, err
 	if allowed != nil && !allowed[ext] {
 		return "", fmt.Errorf("不接受 %s 格式", strings.ToUpper(ext))
 	}
-	safe := regexp.MustCompile(`[^A-Za-z0-9_-]`).ReplaceAllString(prefix, "")
+	safe := unsafeName.ReplaceAllString(prefix, "")
 	name := fmt.Sprintf("%s-%d.%s", safe, time.Now().UnixMilli(), ext)
 	if !NameRe.MatchString(name) {
 		return "", errors.New("invalid file name")
@@ -110,9 +116,7 @@ type Fetcher struct {
 
 // NewFetcher returns a fetcher with the given timeout and TLS policy.
 func NewFetcher(dir, siBase string, timeout time.Duration, verifyTLS bool) *Fetcher {
-	tr := http.DefaultTransport.(*http.Transport).Clone()
-	tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: !verifyTLS} //nolint:gosec // configurable for self-signed hosts
-	return &Fetcher{Dir: dir, SimpleIconsBase: siBase, Client: &http.Client{Timeout: timeout, Transport: tr, CheckRedirect: limitRedirects}}
+	return &Fetcher{Dir: dir, SimpleIconsBase: siBase, Client: httpclient.New(timeout, verifyTLS, httpclient.LimitRedirects)}
 }
 
 const maxIcon = 512 << 10
@@ -150,20 +154,6 @@ type candidate struct {
 	href string
 	size int
 }
-
-// limitRedirects allows at most 5 redirects, to http(s) only.
-func limitRedirects(req *http.Request, via []*http.Request) error {
-	if len(via) >= 5 {
-		return errors.New("too many redirects")
-	}
-	if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
-		return errors.New("redirect to unsupported scheme")
-	}
-	return nil
-}
-
-// LimitRedirects is limitRedirects for other packages.
-var LimitRedirects = limitRedirects
 
 // IconCandidates extracts icon links from HTML, best first.
 func IconCandidates(html string, base *url.URL) []string {

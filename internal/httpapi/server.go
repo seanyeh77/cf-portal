@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
@@ -181,7 +182,10 @@ func writeAnyErr(w http.ResponseWriter, err error) {
 	var ve *dnsrec.ValidationError
 	var ce *dnsrec.ConflictError
 	var cfe *cloudflare.Error
+	var tooBig *http.MaxBytesError
 	switch {
+	case errors.As(err, &tooBig):
+		writeErr(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("請求內容超過 %d MB", tooBig.Limit>>20))
 	case errors.As(err, &ve):
 		writeErr(w, http.StatusUnprocessableEntity, ve.Msg)
 	case errors.As(err, &ce):
@@ -196,12 +200,16 @@ func writeAnyErr(w http.ResponseWriter, err error) {
 	}
 }
 
-func decode(r *http.Request, v any) error {
-	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 4<<20))
-	if err := dec.Decode(v); err != nil {
+// maxJSONBody limits JSON request bodies; uploads set their own limits.
+const maxJSONBody = 4 << 20
+
+func decode(w http.ResponseWriter, r *http.Request, v any) error {
+	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxJSONBody)).Decode(v)
+	var tooBig *http.MaxBytesError
+	if err != nil && !errors.As(err, &tooBig) {
 		return &dnsrec.ValidationError{Msg: "請求格式錯誤：" + err.Error()}
 	}
-	return nil
+	return err
 }
 
 func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {

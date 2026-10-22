@@ -19,9 +19,11 @@ func boolStr(b bool) string {
 	return "false"
 }
 
-// cell neutralizes values a spreadsheet would treat as a formula.
+// cell neutralizes values a spreadsheet would treat as a formula. A value
+// that already starts with "'" is escaped too, so the import side
+// (web/src/admin/lib/csv.ts unescapeCell) can always strip exactly one.
 func cell(v string) string {
-	if v != "" && strings.ContainsRune("=+-@\t\r", rune(v[0])) {
+	if v != "" && strings.ContainsRune("=+-@\t\r'", rune(v[0])) {
 		return "'" + v
 	}
 	return v

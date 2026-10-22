@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"io/fs"
 	"net/http"
 	"os"
@@ -45,7 +46,7 @@ func (s *Server) serveAsset(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.Header().Set("Cache-Control", "no-cache")
 	}
-	http.ServeContent(w, r, p, time.Time{}, strings.NewReader(string(b)))
+	http.ServeContent(w, r, p, time.Time{}, bytes.NewReader(b))
 }
 
 // serveFile serves uploaded images with a restrictive policy.
@@ -133,7 +134,7 @@ func (s *Server) portalData(r *http.Request) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	status, err := s.Health.Summaries(ctx, s.Now())
+	status, err := s.Health.Summaries(ctx, s.Now(), ls)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +190,7 @@ func (s *Server) portalJSON(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) statusJSON(w http.ResponseWriter, r *http.Request) {
-	st, err := s.Health.Summaries(r.Context(), s.Now())
+	st, err := s.Health.Summaries(r.Context(), s.Now(), nil)
 	if err != nil {
 		writeAnyErr(w, err)
 		return

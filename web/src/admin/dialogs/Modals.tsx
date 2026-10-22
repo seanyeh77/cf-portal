@@ -3,7 +3,7 @@ import { api, errMsg } from '../../shared/api';
 import { addMonth, semesterEnd } from '../../shared/format';
 import { Dialog, Tip, toast } from '../../shared/ui';
 import { refreshRecords, useRecords } from '../lib/data';
-import { sub } from '../lib/records';
+import { ownersOf, sub } from '../lib/records';
 import { closeModal, drawerStore, modalStore, selectionStore, useStore } from '../lib/store';
 import type { DNSRecord, RecordsData } from '../types';
 import { BatchDialog } from './BatchDialog';
@@ -113,7 +113,7 @@ function BulkMetaDialog({ ids, focusOwner, data }: { ids: string[]; focusOwner?:
   useEffect(() => {
     if (focusOwner) window.setTimeout(() => ownerRef.current?.focus(), 0);
   }, [focusOwner]);
-  const owners = Array.from(new Set(data.records.map((r) => r.meta.owner).filter(Boolean))).sort();
+  const owners = ownersOf(data.records);
   const set = (k: BulkField, val: string) => setV((p) => ({ ...p, [k]: val }));
   const save = async () => {
     const body: Record<string, unknown> = {};

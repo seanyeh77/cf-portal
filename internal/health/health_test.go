@@ -48,7 +48,7 @@ func TestCheck(t *testing.T) {
 	st.PutListing(ctx, model.Listing{RecordID: "a", Hostname: "a", Title: "A", URL: &up, Icon: "none"})
 	st.PutListing(ctx, model.Listing{RecordID: "b", Hostname: "b", Title: "B", URL: &down, Icon: "none"})
 	c.RunOnce(ctx)
-	sum, err := c.Summaries(ctx, time.Now())
+	sum, err := c.Summaries(ctx, time.Now(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

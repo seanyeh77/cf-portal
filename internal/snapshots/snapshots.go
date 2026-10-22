@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nycu-sdc/sdc-portal/internal/dnsrec"
@@ -22,15 +23,9 @@ var NameRe = regexp.MustCompile(`^(\d{8}-\d{6})-(auto|manual)\.json$`)
 
 // Record is one record inside a snapshot.
 type Record struct {
-	ID       string     `json:"id"`
-	Type     string     `json:"type"`
-	Name     string     `json:"name"`
-	Content  string     `json:"content"`
-	TTL      int        `json:"ttl"`
-	Proxied  bool       `json:"proxied"`
-	Priority *int       `json:"priority"`
-	Comment  string     `json:"comment"`
-	Meta     model.Meta `json:"meta"`
+	ID string `json:"id"`
+	model.RecordInput
+	Meta model.Meta `json:"meta"`
 }
 
 // Snapshot is the file content.
@@ -54,14 +49,58 @@ type Info struct {
 type Store struct {
 	Dir string
 	Loc *time.Location
+
+	mu     sync.Mutex
+	counts map[string]int // record count per file; files never change once written
+}
+
+func (s *Store) count(name string) int {
+	s.mu.Lock()
+	n, ok := s.counts[name]
+	s.mu.Unlock()
+	if ok {
+		return n
+	}
+	snap, err := s.Load(name)
+	if err != nil {
+		return 0
+	}
+	s.mu.Lock()
+	if s.counts == nil {
+		s.counts = map[string]int{}
+	}
+	s.counts[name] = len(snap.Records)
+	s.mu.Unlock()
+	return len(snap.Records)
+}
+
+func (s *Store) nameTime(name string) (time.Time, string, bool) {
+	m := NameRe.FindStringSubmatch(name)
+	if m == nil {
+		return time.Time{}, "", false
+	}
+	t, err := time.ParseInLocation("20060102-150405", m[1], s.Loc)
+	return t, m[2], err == nil
+}
+
+// Latest returns the time of the newest snapshot (zero if none) without
+// reading any snapshot file.
+func (s *Store) Latest() time.Time {
+	ents, _ := os.ReadDir(s.Dir)
+	var latest time.Time
+	for _, e := range ents {
+		if t, _, ok := s.nameTime(e.Name()); ok && t.After(latest) {
+			latest = t
+		}
+	}
+	return latest
 }
 
 // FromRecords builds snapshot records.
 func FromRecords(recs []model.Record, meta map[string]model.Meta) []Record {
 	out := make([]Record, 0, len(recs))
 	for _, r := range recs {
-		out = append(out, Record{ID: r.ID, Type: r.Type, Name: r.Name, Content: r.Content, TTL: r.TTL, Proxied: r.Proxied,
-			Priority: r.Priority, Comment: r.Comment, Meta: meta[r.ID]})
+		out = append(out, Record{ID: r.ID, RecordInput: r.Input(), Meta: meta[r.ID]})
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Name != out[j].Name {
@@ -98,6 +137,12 @@ func (s *Store) Create(zone, source string, recs []Record, at time.Time) (Info, 
 	if err := os.Rename(tmp, filepath.Join(s.Dir, name)); err != nil {
 		return Info{}, err
 	}
+	s.mu.Lock()
+	if s.counts == nil {
+		s.counts = map[string]int{}
+	}
+	s.counts[name] = len(recs)
+	s.mu.Unlock()
 	return Info{Name: name, TS: snap.TS, Source: source, Count: len(recs), Size: int64(len(b))}, nil
 }
 
@@ -109,23 +154,13 @@ func (s *Store) List() ([]Info, error) {
 	}
 	out := []Info{}
 	for _, e := range ents {
-		m := NameRe.FindStringSubmatch(e.Name())
-		if m == nil {
+		t, source, ok := s.nameTime(e.Name())
+		if !ok {
 			continue
 		}
-		t, err := time.ParseInLocation("20060102-150405", m[1], s.Loc)
-		if err != nil {
-			continue
-		}
-		info := Info{Name: e.Name(), TS: float64(t.Unix()), Source: m[2]}
+		info := Info{Name: e.Name(), TS: float64(t.Unix()), Source: source, Count: s.count(e.Name())}
 		if fi, err := e.Info(); err == nil {
 			info.Size = fi.Size()
-		}
-		if snap, err := s.Load(e.Name()); err == nil {
-			info.Count = len(snap.Records)
-			if snap.TS > 0 {
-				info.TS = snap.TS
-			}
 		}
 		out = append(out, info)
 	}
@@ -151,14 +186,9 @@ func (s *Store) Load(name string) (*Snapshot, error) {
 
 // HasDay reports whether a snapshot was taken on the given local day.
 func (s *Store) HasDay(day time.Time) bool {
-	prefix := day.In(s.Loc).Format("20060102")
-	ents, _ := os.ReadDir(s.Dir)
-	for _, e := range ents {
-		if NameRe.MatchString(e.Name()) && strings.HasPrefix(e.Name(), prefix) {
-			return true
-		}
-	}
-	return false
+	y, m, d := day.In(s.Loc).Date()
+	ly, lm, ld := s.Latest().Date()
+	return y == ly && m == lm && d == ld
 }
 
 // Prune keeps the newest keep automatic snapshots.
@@ -192,39 +222,6 @@ type Diff struct {
 	Removed []Record       `json:"removed"`
 	Changed []Change       `json:"changed"`
 	Added   []model.Record `json:"added"`
-}
-
-func ip(p *int) int {
-	if p == nil {
-		return -1
-	}
-	return *p
-}
-
-func changedFields(a Record, b model.Record) []string {
-	var f []string
-	if a.Type != b.Type {
-		f = append(f, "type")
-	}
-	if !strings.EqualFold(a.Name, b.Name) {
-		f = append(f, "name")
-	}
-	if a.Content != b.Content {
-		f = append(f, "content")
-	}
-	if a.TTL != b.TTL {
-		f = append(f, "ttl")
-	}
-	if a.Proxied != b.Proxied {
-		f = append(f, "proxied")
-	}
-	if ip(a.Priority) != ip(b.Priority) {
-		f = append(f, "priority")
-	}
-	if a.Comment != b.Comment {
-		f = append(f, "comment")
-	}
-	return f
 }
 
 func sameIdentity(a Record, b model.Record) bool {
@@ -271,7 +268,7 @@ func Compare(snap []Record, current []model.Record) Diff {
 	}
 	sort.Ints(idx)
 	for _, i := range idx {
-		if f := changedFields(pairs[i], current[i]); len(f) > 0 {
+		if f := model.ChangedFields(pairs[i].RecordInput, current[i].Input()); len(f) > 0 {
 			d.Changed = append(d.Changed, Change{Fields: f, Then: pairs[i], Now: current[i]})
 		}
 	}
@@ -323,7 +320,11 @@ func BIND(zone string, recs []Record, ts time.Time) string {
 		case "CNAME", "NS", "PTR", "DNAME":
 			content = dot(content)
 		case "MX":
-			content = fmt.Sprintf("%d %s", max(ip(r.Priority), 0), dot(content))
+			prio := 0
+			if r.Priority != nil {
+				prio = *r.Priority
+			}
+			content = fmt.Sprintf("%d %s", prio, dot(content))
 		case "SRV":
 			f := strings.Fields(content)
 			if len(f) == 3 {

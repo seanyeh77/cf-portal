@@ -1,22 +1,15 @@
 import { useQuery } from '@tanstack/react-query';
-import { api, errMsg } from '../../shared/api';
+import { api } from '../../shared/api';
 import { fmtDateTimeShort, relTime } from '../../shared/format';
-import { confirmDialog, Dialog, Tip, toast } from '../../shared/ui';
-import { refreshRecords } from '../lib/data';
+import { confirmDialog, Dialog, Tip } from '../../shared/ui';
+import { act } from '../lib/data';
 import { ACTION_LABEL, restorePlan, summarize } from '../lib/audit';
 import { dependents, LEVEL_NAME, SCANNABLE, statusIssues, sub, ttlLabel } from '../lib/records';
-import { drawerStore, markPending, modalStore, openDrawer, openEditor } from '../lib/store';
+import { drawerStore, modalStore, openDrawer, openEditor } from '../lib/store';
 import type { AuditEntry, DNSRecord, RecordsData } from '../types';
 
-async function mute(r: DNSRecord, kind: string, muted: boolean) {
-  try {
-    await api('POST', '/api/issues/mute', { record_id: r.id, kind, muted });
-    toast(muted ? '已忽略' : '已還原');
-    refreshRecords();
-  } catch (e) {
-    toast(errMsg(e), { error: true });
-  }
-}
+const mute = (r: DNSRecord, kind: string, muted: boolean) =>
+  act(() => api('POST', '/api/issues/mute', { record_id: r.id, kind, muted }), muted ? '已忽略' : '已還原');
 
 export async function runRestore(e: AuditEntry) {
   const plan = restorePlan(e);
@@ -28,14 +21,7 @@ export async function runRestore(e: AuditEntry) {
     danger: plan.danger,
   });
   if (!ok) return;
-  try {
-    const res = await api<{ record?: { id: string } }>('POST', '/api/records/restore', plan.body);
-    if (res.record?.id) markPending(res.record.id);
-    toast('已還原');
-    refreshRecords();
-  } catch (err) {
-    toast(errMsg(err), { error: true });
-  }
+  await act(() => api('POST', '/api/records/restore', plan.body), '已還原');
 }
 
 function History({ r }: { r: DNSRecord }) {
@@ -85,16 +71,7 @@ export function RecordDrawer({ r, data }: { r: DNSRecord; data: RecordsData }) {
   const close = () => drawerStore.set(null);
   const deps = dependents(data.records, r.name).filter((d) => d.id !== r.id);
   const now = Date.now() / 1000;
-  const recheck = async () => {
-    try {
-      markPending(r.id);
-      await api('POST', `/api/records/${r.id}/scan`);
-      toast('已開始連線檢查');
-      refreshRecords();
-    } catch (e) {
-      toast(errMsg(e), { error: true });
-    }
-  };
+  const recheck = () => act(() => api('POST', `/api/records/${r.id}/scan`), '已開始連線檢查');
   return (
     <Dialog
       className="drawer"

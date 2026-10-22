@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { api, errMsg } from '../../shared/api';
 import { fmtDateTimeShort, relTime } from '../../shared/format';
-import { Tip, toast } from '../../shared/ui';
+import { copyText, Tip } from '../../shared/ui';
 import { go } from '../App';
-import { refreshRecords, useRecords } from '../lib/data';
+import { act, useRecords } from '../lib/data';
 import { EXPIRY_KINDS, LEVEL_NAME, rowLevel } from '../lib/records';
 import { modalStore, openEditor, setFilters } from '../lib/store';
 import type { RecordsData } from '../types';
@@ -69,15 +69,8 @@ export function Overview() {
 
   const startScan = async () => {
     setStarting(true);
-    try {
-      await api('POST', '/api/scan');
-      toast('已開始連線檢查');
-      await refreshRecords();
-    } catch (e) {
-      toast(errMsg(e), { error: true });
-    } finally {
-      setStarting(false);
-    }
+    await act(() => api('POST', '/api/scan'), '已開始連線檢查');
+    setStarting(false);
   };
 
   return (
@@ -171,12 +164,7 @@ export function Overview() {
                   <button
                     type="button"
                     className="btn"
-                    onClick={() =>
-                      navigator.clipboard.writeText(window.location.origin + '/request').then(
-                        () => toast('已複製申請頁連結'),
-                        () => toast('無法複製，請手動複製網址', { error: true }),
-                      )
-                    }
+                    onClick={() => copyText(window.location.origin + '/request', '已複製申請頁連結')}
                   >
                     複製申請頁連結
                   </button>

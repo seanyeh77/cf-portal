@@ -1,6 +1,6 @@
 import { useState, type CSSProperties, type ReactNode } from 'react';
 import { fmtDateTimeShort } from '../shared/format';
-import { Tip, toast } from '../shared/ui';
+import { copyText, Tip } from '../shared/ui';
 import { inkFor, type Site } from './Portal';
 
 export type PublicInit = {
@@ -169,12 +169,7 @@ export function RequestStatusPage({ init }: { init: PublicInit }) {
             <button
               type="button"
               className="btn small"
-              onClick={() =>
-                navigator.clipboard?.writeText(link).then(
-                  () => toast('已複製連結'),
-                  () => toast('無法複製，請手動複製網址', { error: true }),
-                )
-              }
+              onClick={() => copyText(link, '已複製連結')}
             >
               複製
             </button>

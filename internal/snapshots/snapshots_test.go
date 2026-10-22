@@ -14,13 +14,13 @@ func p(i int) *int { return &i }
 
 func TestBIND(t *testing.T) {
 	recs := []Record{
-		{Type: "A", Name: "grafana.sdc.nycu.club", Content: "10.0.1.20", TTL: 1},
-		{Type: "TXT", Name: "_dmarc.sdc.nycu.club", Content: `v=DMARC1; p="none"`, TTL: 3600},
-		{Type: "TXT", Name: "q.sdc.nycu.club", Content: `"already quoted"`, TTL: 1},
-		{Type: "CNAME", Name: "docs.sdc.nycu.club", Content: "sdc-docs.pages.dev", TTL: 1, Proxied: true},
-		{Type: "MX", Name: "sdc.nycu.club", Content: "mail.example.com", TTL: 1, Priority: p(10)},
-		{Type: "NS", Name: "sub.sdc.nycu.club", Content: "ns1.example.com.", TTL: 86400},
-		{Type: "SRV", Name: "_mc._tcp.sdc.nycu.club", Content: "0 25565 mc.sdc.nycu.club", TTL: 1, Priority: p(10)},
+		{RecordInput: model.RecordInput{Type: "A", Name: "grafana.sdc.nycu.club", Content: "10.0.1.20", TTL: 1}},
+		{RecordInput: model.RecordInput{Type: "TXT", Name: "_dmarc.sdc.nycu.club", Content: `v=DMARC1; p="none"`, TTL: 3600}},
+		{RecordInput: model.RecordInput{Type: "TXT", Name: "q.sdc.nycu.club", Content: `"already quoted"`, TTL: 1}},
+		{RecordInput: model.RecordInput{Type: "CNAME", Name: "docs.sdc.nycu.club", Content: "sdc-docs.pages.dev", TTL: 1, Proxied: true}},
+		{RecordInput: model.RecordInput{Type: "MX", Name: "sdc.nycu.club", Content: "mail.example.com", TTL: 1, Priority: p(10)}},
+		{RecordInput: model.RecordInput{Type: "NS", Name: "sub.sdc.nycu.club", Content: "ns1.example.com.", TTL: 86400}},
+		{RecordInput: model.RecordInput{Type: "SRV", Name: "_mc._tcp.sdc.nycu.club", Content: "0 25565 mc.sdc.nycu.club", TTL: 1, Priority: p(10)}},
 	}
 	out := BIND("sdc.nycu.club", recs, time.Unix(0, 0))
 	for _, want := range []string{
@@ -37,7 +37,7 @@ func TestBIND(t *testing.T) {
 			t.Errorf("missing %q in\n%s", want, out)
 		}
 	}
-	long := BIND("z", []Record{{Type: "TXT", Name: "a.z", Content: strings.Repeat("x", 300), TTL: 1}}, time.Unix(0, 0))
+	long := BIND("z", []Record{{RecordInput: model.RecordInput{Type: "TXT", Name: "a.z", Content: strings.Repeat("x", 300), TTL: 1}}}, time.Unix(0, 0))
 	if !strings.Contains(long, `" "`) {
 		t.Error("long TXT must be split")
 	}
@@ -45,10 +45,10 @@ func TestBIND(t *testing.T) {
 
 func TestCompare(t *testing.T) {
 	snap := []Record{
-		{ID: "1", Type: "A", Name: "a.z", Content: "10.0.0.1", TTL: 1},
-		{ID: "2", Type: "A", Name: "b.z", Content: "10.0.0.2", TTL: 1},
-		{ID: "3", Type: "CNAME", Name: "c.z", Content: "x.example.com", TTL: 1},
-		{ID: "4", Type: "A", Name: "d.z", Content: "10.0.0.4", TTL: 1},
+		{ID: "1", RecordInput: model.RecordInput{Type: "A", Name: "a.z", Content: "10.0.0.1", TTL: 1}},
+		{ID: "2", RecordInput: model.RecordInput{Type: "A", Name: "b.z", Content: "10.0.0.2", TTL: 1}},
+		{ID: "3", RecordInput: model.RecordInput{Type: "CNAME", Name: "c.z", Content: "x.example.com", TTL: 1}},
+		{ID: "4", RecordInput: model.RecordInput{Type: "A", Name: "d.z", Content: "10.0.0.4", TTL: 1}},
 	}
 	cur := []model.Record{
 		{ID: "1", Type: "A", Name: "a.z", Content: "10.0.0.1", TTL: 1},

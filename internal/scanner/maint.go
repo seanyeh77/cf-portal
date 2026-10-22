@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/nycu-sdc/sdc-portal/internal/cloudflare"
+	"github.com/nycu-sdc/sdc-portal/internal/model"
 	"github.com/nycu-sdc/sdc-portal/internal/snapshots"
 	"github.com/nycu-sdc/sdc-portal/internal/store"
 )
@@ -27,24 +28,24 @@ type Maint struct {
 	lastIconRetry time.Time
 }
 
-// Snapshot saves the current zone.
-func (m *Maint) Snapshot(ctx context.Context, source string) (snapshots.Info, error) {
+// Snapshot saves the current zone and returns the records it saved.
+func (m *Maint) Snapshot(ctx context.Context, source string) (snapshots.Info, []model.Record, error) {
 	recs, _, err := m.CF.List(ctx, true)
 	if err != nil {
-		return snapshots.Info{}, err
+		return snapshots.Info{}, nil, err
 	}
 	meta, err := m.Store.AllMeta(ctx)
 	if err != nil {
-		return snapshots.Info{}, err
+		return snapshots.Info{}, nil, err
 	}
 	info, err := m.Snaps.Create(m.CF.ZoneName(), source, snapshots.FromRecords(recs, meta), time.Now())
 	if err != nil {
-		return info, err
+		return info, nil, err
 	}
 	if source == "auto" {
 		m.Snaps.Prune(m.Keep)
 	}
-	return info, nil
+	return info, recs, nil
 }
 
 // AutoDelete deletes records whose expiry passed and that are marked for
@@ -83,7 +84,7 @@ func (m *Maint) AutoDelete(ctx context.Context, now time.Time) (int, error) {
 func (m *Maint) RunOnce(ctx context.Context) {
 	now := time.Now()
 	if !m.Snaps.HasDay(now) {
-		if _, err := m.Snapshot(ctx, "auto"); err != nil {
+		if _, _, err := m.Snapshot(ctx, "auto"); err != nil {
 			log.Printf("maint: snapshot: %v", err)
 		}
 	}

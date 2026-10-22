@@ -6,7 +6,8 @@ export const LEVEL_NAME: Record<Level, string> = { high: '緊急', medium: '注�
 export const PREFIX: Partial<Record<Level, string>> = { high: '緊急：', medium: '注意：' };
 
 export const SCANNABLE = new Set(['A', 'AAAA', 'CNAME']);
-export const EDITABLE = new Set(['A', 'AAAA', 'CNAME', 'TXT', 'MX']);
+/** Types the public request form offers (mirrors requestTypes in Go). */
+export const REQUEST_TYPES = ['A', 'AAAA', 'CNAME', 'TXT'];
 export const PROXIABLE = new Set(['A', 'AAAA', 'CNAME']);
 export const EXPIRY_KINDS = new Set(['expired', 'expiring']);
 /** Issues the status column leaves to other columns. */
@@ -36,12 +37,6 @@ export function sub(name: string, zone: string) {
 
 export function normTarget(s: string) {
   return s.trim().toLowerCase().replace(/\.$/, '');
-}
-
-export function targetKey(r: DNSRecord) {
-  if (r.type === 'CNAME') return normTarget(r.content);
-  if (r.type === 'A' || r.type === 'AAAA') return r.content.trim();
-  return '';
 }
 
 export function isPrivateIP(s: string) {
@@ -79,18 +74,18 @@ export function dotState(r: DNSRecord, pending: boolean, now: number): { state: 
 
 // ---- expiry ----
 
-export type ExpiryView = { text: string; cls: string; tip: string; extend: boolean; days: number } | null;
+export type ExpiryView = { text: string; cls: string; tip: string; extend: boolean } | null;
 
 export function expiryView(r: DNSRecord, today: string, warnDays: number): ExpiryView {
   const e = r.meta.expires_at;
   if (!e) return null;
   const days = dayDiff(today, e);
   const tip = `到期日 ${e}${r.meta.auto_delete ? '，到期後自動刪除' : '，到期後不會自動刪除'}`;
-  if (days < 0) return { text: `已過期 ${-days} 日`, cls: 'lv-high', tip, extend: true, days };
-  if (days === 0) return { text: '今日到期', cls: 'lv-high', tip, extend: true, days };
-  if (days <= warnDays) return { text: `剩 ${days} 日`, cls: 'lv-medium', tip, extend: true, days };
-  if (days <= 60) return { text: `剩 ${days} 日`, cls: 'muted', tip, extend: false, days };
-  return { text: e, cls: 'muted', tip, extend: false, days };
+  if (days < 0) return { text: `已過期 ${-days} 日`, cls: 'lv-high', tip, extend: true };
+  if (days === 0) return { text: '今日到期', cls: 'lv-high', tip, extend: true };
+  if (days <= warnDays) return { text: `剩 ${days} 日`, cls: 'lv-medium', tip, extend: true };
+  if (days <= 60) return { text: `剩 ${days} 日`, cls: 'muted', tip, extend: false };
+  return { text: e, cls: 'muted', tip, extend: false };
 }
 
 // ---- filters ----
@@ -106,7 +101,8 @@ export type Filters = {
 
 export const EMPTY_FILTERS: Filters = { q: '', type: '', group: '', health: '', expiry: '', severity: '' };
 
-export function matches(r: DNSRecord, f: Filters, today: string, skipSeverity = false) {
+/** Applies every filter except severity, which callers count separately. */
+export function matches(r: DNSRecord, f: Filters) {
   if (f.q) {
     const q = f.q.toLowerCase();
     const hay = [r.name, r.content, r.comment, r.meta.owner, r.meta.purpose, r.meta.notes, r.listing?.title ?? ''].join('\n').toLowerCase();
@@ -121,15 +117,9 @@ export function matches(r: DNSRecord, f: Filters, today: string, skipSeverity = 
       if (r.muted.length === 0) return false;
     } else if (!hasIssue(r, f.health)) return false;
   }
-  if (f.expiry) {
-    const e = r.meta.expires_at;
-    if (f.expiry === 'has' && !e) return false;
-    if (f.expiry === 'none' && e) return false;
-    if (f.expiry === 'expired' && !hasIssue(r, 'expired')) return false;
-    if (f.expiry === 'expiring' && !hasIssue(r, 'expiring')) return false;
-  }
-  void today;
-  if (!skipSeverity && f.severity && rowLevel(r) !== f.severity) return false;
+  if (f.expiry === 'has' && !r.meta.expires_at) return false;
+  if (f.expiry === 'none' && r.meta.expires_at) return false;
+  if (EXPIRY_KINDS.has(f.expiry) && !hasIssue(r, f.expiry)) return false;
   return true;
 }
 
@@ -171,7 +161,7 @@ function severityScore(r: DNSRecord) {
   return rank * 2 + unreachable;
 }
 
-export function sortRecords(list: DNSRecord[], sort: Sort, zone: string, today: string) {
+export function sortRecords(list: DNSRecord[], sort: Sort, zone: string) {
   const mul = sort.dir === 'asc' ? 1 : -1;
   const byName = (a: DNSRecord, b: DNSRecord) => nameKey(a, zone).localeCompare(nameKey(b, zone)) || a.type.localeCompare(b.type);
   const cmp: Record<SortKey, (a: DNSRecord, b: DNSRecord) => number> = {
@@ -186,7 +176,6 @@ export function sortRecords(list: DNSRecord[], sort: Sort, zone: string, today: 
       return mul * ea.localeCompare(eb) || byName(a, b);
     },
   };
-  void today;
   return [...list].sort(cmp[sort.key]);
 }
 
@@ -195,7 +184,7 @@ export function sortRecords(list: DNSRecord[], sort: Sort, zone: string, today: 
 const labelRe = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
 export function nameRuleError(input: string, zone: string, rule: string): string {
-  let rel = input.trim().toLowerCase().replace(/\.$/, '');
+  let rel = normTarget(input);
   if (rel === '' || rel === '@' || rel === zone) return '';
   if (rel.endsWith('.' + zone)) rel = rel.slice(0, -(zone.length + 1));
   let underscore = false;
@@ -218,7 +207,7 @@ export function nameRuleError(input: string, zone: string, rule: string): string
 }
 
 export function fqdn(input: string, zone: string) {
-  const n = input.trim().toLowerCase().replace(/\.$/, '');
+  const n = normTarget(input);
   if (n === '' || n === '@' || n === zone) return zone;
   return n.endsWith('.' + zone) ? n : `${n}.${zone}`;
 }
@@ -246,4 +235,28 @@ export function ttlLabel(ttl: number) {
 export function dependents(records: DNSRecord[], name: string) {
   const n = normTarget(name);
   return records.filter((r) => r.type === 'CNAME' && normTarget(r.content) === n);
+}
+
+/** Labels of DNS record fields, keyed by API name. */
+export const DNS_FIELD_LABEL: Record<string, string> = {
+  type: '類型',
+  name: '名稱',
+  content: '指向',
+  ttl: 'TTL',
+  proxied: 'Proxy',
+  priority: 'Priority',
+  comment: '備註',
+};
+
+/** A DNS field value as shown to people. */
+export function fieldValue(field: string, v: unknown) {
+  if (field === 'proxied') return v ? '啟用' : '停用';
+  if (field === 'ttl' && typeof v === 'number') return ttlLabel(v);
+  if (v == null || v === '') return '（空）';
+  return String(v);
+}
+
+/** Distinct owners, for owner field suggestions. */
+export function ownersOf(records: DNSRecord[]) {
+  return Array.from(new Set(records.map((r) => r.meta.owner).filter(Boolean))).sort();
 }

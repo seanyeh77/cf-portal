@@ -60,6 +60,8 @@ export type DNSRecord = {
   modified_on?: string;
   editable: boolean;
   group: string;
+  /** Canonical target for A/AAAA/CNAME, the key of RecordsData.targets. */
+  target_key: string;
   listing: Listing | null;
   meta: Meta;
   scan: Scan | null;
@@ -76,6 +78,8 @@ export type ScanStatus = {
   error: string;
   dns_ok: boolean;
   interval: number;
+  /** Records whose single-record check is in progress. */
+  pending: string[];
 };
 
 export type RecordsData = {

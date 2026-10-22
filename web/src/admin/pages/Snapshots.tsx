@@ -3,17 +3,9 @@ import { useState } from 'react';
 import { api, errMsg } from '../../shared/api';
 import { fmtDateTimeShort } from '../../shared/format';
 import { confirmDialog, Tip, toast } from '../../shared/ui';
-import { refreshRecords } from '../lib/data';
-import { markPending } from '../lib/store';
+import { act } from '../lib/data';
+import { DNS_FIELD_LABEL, fieldValue } from '../lib/records';
 import type { SnapshotDiff, SnapshotInfo, SnapRecord } from '../types';
-
-const LABEL: Record<string, string> = { type: '類型', name: '名稱', content: '指向', ttl: 'TTL', proxied: 'Proxy', priority: 'Priority', comment: '備註' };
-
-function fmt(v: unknown) {
-  if (typeof v === 'boolean') return v ? '啟用' : '停用';
-  if (v == null || v === '') return '（空）';
-  return String(v);
-}
 
 export function Snapshots() {
   const q = useQuery({ queryKey: ['snapshots'], queryFn: () => api<{ snapshots: SnapshotInfo[]; keep: number }>('GET', '/api/snapshots') });
@@ -22,16 +14,8 @@ export function Snapshots() {
 
   const create = async () => {
     setBusy(true);
-    try {
-      await api('POST', '/api/snapshots');
-      toast('已建立快照');
-      q.refetch();
-      refreshRecords();
-    } catch (e) {
-      toast(errMsg(e), { error: true });
-    } finally {
-      setBusy(false);
-    }
+    await act(() => api('POST', '/api/snapshots'), '已建立快照');
+    setBusy(false);
   };
   const compare = async (name: string) => {
     try {
@@ -43,15 +27,8 @@ export function Snapshots() {
   const restore = async (title: string, body: Record<string, unknown>, describe: string, danger = false) => {
     const ok = await confirmDialog({ title, body: <p className="pre">{describe}</p>, confirmText: title, danger });
     if (!ok) return;
-    try {
-      const res = await api<{ record?: { id: string } }>('POST', '/api/records/restore', body);
-      if (res.record?.id) markPending(res.record.id);
-      toast('已還原');
-      refreshRecords();
-      if (diff) compare(diff.name);
-    } catch (e) {
-      toast(errMsg(e), { error: true });
-    }
+    await act(() => api('POST', '/api/records/restore', body), '已還原');
+    if (diff) compare(diff.name);
   };
   const input = (r: SnapRecord) => ({ type: r.type, name: r.name, content: r.content, ttl: r.ttl, proxied: r.proxied, priority: r.priority, comment: r.comment });
 
@@ -139,7 +116,7 @@ export function Snapshots() {
               <span className="small">
                 {c.fields.map((f) => (
                   <span key={f} className="diff-field">
-                    {LABEL[f] ?? f}：<del className="old">{fmt((c.then as unknown as Record<string, unknown>)[f])}</del> → {fmt((c.now as unknown as Record<string, unknown>)[f])}
+                    {DNS_FIELD_LABEL[f] ?? f}：<del className="old">{fieldValue(f, (c.then as unknown as Record<string, unknown>)[f])}</del> → {fieldValue(f, (c.now as unknown as Record<string, unknown>)[f])}
                   </span>
                 ))}
               </span>
@@ -151,7 +128,7 @@ export function Snapshots() {
                   restore(
                     '改回',
                     { mode: 'revert', record_id: c.now.id, data: input(c.then) },
-                    `將 ${c.now.name} 改回快照時的設定：\n${c.fields.map((f) => `${LABEL[f] ?? f}：${fmt((c.now as unknown as Record<string, unknown>)[f])} → ${fmt((c.then as unknown as Record<string, unknown>)[f])}`).join('\n')}`,
+                    `將 ${c.now.name} 改回快照時的設定：\n${c.fields.map((f) => `${DNS_FIELD_LABEL[f] ?? f}：${fieldValue(f, (c.now as unknown as Record<string, unknown>)[f])} → ${fieldValue(f, (c.then as unknown as Record<string, unknown>)[f])}`).join('\n')}`,
                   )
                 }
               >

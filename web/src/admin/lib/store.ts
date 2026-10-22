@@ -55,23 +55,6 @@ export function setFilters(patch: Partial<Filters>, replace = false) {
   viewStore.set((v) => ({ ...v, filters: replace ? { ...EMPTY_FILTERS, ...patch } : { ...v.filters, ...patch } }));
 }
 
-// ---- records waiting for a connection check after saving ----
-
-export const pendingStore = createStore<Record<string, number>>({});
-
-export function markPending(id: string) {
-  pendingStore.set((p) => ({ ...p, [id]: Date.now() / 1000 - 1 }));
-}
-
-export function clearPending(ids: string[]) {
-  if (!ids.length) return;
-  pendingStore.set((p) => {
-    const n = { ...p };
-    ids.forEach((id) => delete n[id]);
-    return n;
-  });
-}
-
 // ---- dialogs ----
 
 export type EditorFocus = 'content' | 'proxied' | 'name' | 'expires' | 'owner' | undefined;

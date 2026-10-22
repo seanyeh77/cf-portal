@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS listings (
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS checks (record_id TEXT, ts REAL, ok INTEGER, ms INTEGER, status INTEGER);
 CREATE INDEX IF NOT EXISTS checks_rec_ts ON checks(record_id, ts);
+CREATE INDEX IF NOT EXISTS checks_ts ON checks(ts);
 CREATE TABLE IF NOT EXISTS record_meta (
   record_id TEXT PRIMARY KEY,
   owner TEXT NOT NULL DEFAULT '', purpose TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',
@@ -245,13 +246,17 @@ func (s *Store) ForgetRecord(ctx context.Context, id string) (*model.Listing, er
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return nil, err
 	}
-	for _, q := range []string{"DELETE FROM listings WHERE record_id=?", "DELETE FROM record_meta WHERE record_id=?",
-		"DELETE FROM record_scan WHERE record_id=?", "DELETE FROM issue_mutes WHERE record_id=?", "DELETE FROM checks WHERE record_id=?"} {
-		if _, err := s.db.ExecContext(ctx, q, id); err != nil {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	for _, table := range []string{"listings", "record_meta", "record_scan", "issue_mutes", "checks"} {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE record_id=?", id); err != nil {
 			return nil, err
 		}
 	}
-	return l, nil
+	return l, tx.Commit()
 }
 
 // ---- scans ----
@@ -297,18 +302,18 @@ func (s *Store) PutScan(ctx context.Context, id string, ts float64, reachable bo
 
 // PruneScans deletes scan rows whose record id is not in keep.
 func (s *Store) PruneScans(ctx context.Context, keep map[string]bool) error {
-	scans, err := s.AllScans(ctx)
-	if err != nil {
-		return err
+	ids := make([]any, 0, len(keep))
+	marks := make([]string, 0, len(keep))
+	for id := range keep {
+		ids = append(ids, id)
+		marks = append(marks, "?")
 	}
-	for id := range scans {
-		if !keep[id] {
-			if _, err := s.db.ExecContext(ctx, "DELETE FROM record_scan WHERE record_id=?", id); err != nil {
-				return err
-			}
-		}
+	q := "DELETE FROM record_scan"
+	if len(ids) > 0 {
+		q += " WHERE record_id NOT IN (" + strings.Join(marks, ",") + ")"
 	}
-	return nil
+	_, err := s.db.ExecContext(ctx, q, ids...)
+	return err
 }
 
 // ---- mutes ----
@@ -550,9 +555,16 @@ func (s *Store) DecideRequest(ctx context.Context, id int64, status, note string
 	return nil
 }
 
+// PendingRequests counts requests awaiting a decision.
+func (s *Store) PendingRequests(ctx context.Context) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM requests WHERE status='pending'").Scan(&n)
+	return n, err
+}
+
 // CountRequests counts pending requests and requests from ip since ts.
 func (s *Store) CountRequests(ctx context.Context, ip string, since float64) (pending, fromIP int, err error) {
-	if err = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM requests WHERE status='pending'").Scan(&pending); err != nil {
+	if pending, err = s.PendingRequests(ctx); err != nil {
 		return
 	}
 	err = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM requests WHERE ip=? AND ts>=?", ip, since).Scan(&fromIP)
