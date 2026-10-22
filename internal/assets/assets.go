@@ -112,7 +112,7 @@ type Fetcher struct {
 func NewFetcher(dir, siBase string, timeout time.Duration, verifyTLS bool) *Fetcher {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: !verifyTLS} //nolint:gosec // configurable for self-signed hosts
-	return &Fetcher{Dir: dir, SimpleIconsBase: siBase, Client: &http.Client{Timeout: timeout, Transport: tr}}
+	return &Fetcher{Dir: dir, SimpleIconsBase: siBase, Client: &http.Client{Timeout: timeout, Transport: tr, CheckRedirect: limitRedirects}}
 }
 
 const maxIcon = 512 << 10
@@ -151,6 +151,20 @@ type candidate struct {
 	size int
 }
 
+// limitRedirects allows at most 5 redirects, to http(s) only.
+func limitRedirects(req *http.Request, via []*http.Request) error {
+	if len(via) >= 5 {
+		return errors.New("too many redirects")
+	}
+	if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+		return errors.New("redirect to unsupported scheme")
+	}
+	return nil
+}
+
+// LimitRedirects is limitRedirects for other packages.
+var LimitRedirects = limitRedirects
+
 // IconCandidates extracts icon links from HTML, best first.
 func IconCandidates(html string, base *url.URL) []string {
 	var cands []candidate
@@ -168,7 +182,9 @@ func IconCandidates(html string, base *url.URL) []string {
 			continue
 		}
 		abs := base.ResolveReference(ref)
-		if abs.Scheme != "http" && abs.Scheme != "https" {
+		// Only the page's own host: third-party HTML must not steer
+		// requests to other (possibly internal) hosts.
+		if (abs.Scheme != "http" && abs.Scheme != "https") || !strings.EqualFold(abs.Hostname(), base.Hostname()) {
 			continue
 		}
 		size := 32

@@ -19,6 +19,14 @@ func boolStr(b bool) string {
 	return "false"
 }
 
+// cell neutralizes values a spreadsheet would treat as a formula.
+func cell(v string) string {
+	if v != "" && strings.ContainsRune("=+-@\t\r", rune(v[0])) {
+		return "'" + v
+	}
+	return v
+}
+
 func (s *Server) apiExportCSV(w http.ResponseWriter, r *http.Request) {
 	z, err := s.loadZone(r.Context(), true)
 	if err != nil {
@@ -54,8 +62,12 @@ func (s *Server) apiExportCSV(w http.ResponseWriter, r *http.Request) {
 		if rec.Type == "MX" && rec.Priority != nil {
 			content = strconv.Itoa(*rec.Priority) + " " + content
 		}
-		cw.Write([]string{rec.Name, rec.Type, content, boolStr(rec.Proxied), ttl, rec.Comment, o.Meta.Owner, o.Meta.Purpose, o.Meta.Notes,
-			o.Meta.ExpiresAt, boolStr(o.Meta.AutoDelete), boolStr(o.Meta.NoScan), title, cat, o.Group, reachable, lastOK, strings.Join(issues, "；")})
+		row := []string{rec.Name, rec.Type, content, boolStr(rec.Proxied), ttl, rec.Comment, o.Meta.Owner, o.Meta.Purpose, o.Meta.Notes,
+			o.Meta.ExpiresAt, boolStr(o.Meta.AutoDelete), boolStr(o.Meta.NoScan), title, cat, o.Group, reachable, lastOK, strings.Join(issues, "；")}
+		for i := range row {
+			row[i] = cell(row[i])
+		}
+		cw.Write(row)
 	}
 	cw.Flush()
 }

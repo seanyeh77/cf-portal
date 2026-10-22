@@ -274,7 +274,7 @@ func TestExportCSV(t *testing.T) {
 	e := newEnv(t)
 	e.login()
 	g := e.mock.Find("A", "grafana")
-	e.mustOK(e.do("PUT", "/api/records/"+g.ID+"/meta", map[string]any{"owner": "陳, 同學", "purpose": "監控"}))
+	e.mustOK(e.do("PUT", "/api/records/"+g.ID+"/meta", map[string]any{"owner": "陳, 同學", "purpose": "監控", "notes": "=HYPERLINK(\"x\")"}))
 	w := e.do("GET", "/api/export.csv", nil)
 	body := w.Body.String()
 	if !strings.HasPrefix(body, "\xEF\xBB\xBF") {
@@ -286,6 +286,9 @@ func TestExportCSV(t *testing.T) {
 	}
 	if !strings.Contains(body, `grafana.sdc.nycu.club,A,10.0.1.20,false,300,,"陳, 同學",監控`) {
 		t.Fatalf("row missing:\n%s", body)
+	}
+	if !strings.Contains(body, `"'=HYPERLINK(""x"")"`) {
+		t.Fatalf("formula not neutralized:\n%s", body)
 	}
 	if !strings.Contains(body, "student019.sdc.nycu.club,A,10.0.3.119,false,1,,,,,,false,false,,,student,,,未指派負責人") {
 		t.Fatalf("student row:\n%s", body)

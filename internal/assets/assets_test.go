@@ -72,7 +72,8 @@ func TestIconCandidates(t *testing.T) {
 	base, _ := url.Parse("https://svc.example.com/app/")
 	html := `<link rel="icon" href="/f16.png" sizes="16x16"><link rel="mask-icon" href="/m.svg">
 	<link rel="shortcut icon" href="favicon.ico"><LINK REL="apple-touch-icon" HREF="/apple.png">
-	<link rel="icon" type="image/svg+xml" href="/logo.svg"><link rel="icon" href="/f64.png" sizes="64x64">`
+	<link rel="icon" type="image/svg+xml" href="/logo.svg"><link rel="icon" href="/f64.png" sizes="64x64">
+	<link rel="icon" href="http://10.0.0.1/admin.png" sizes="512x512"><link rel="icon" href="javascript:alert(1)">`
 	got := IconCandidates(html, base)
 	want := []string{"https://svc.example.com/logo.svg", "https://svc.example.com/apple.png", "https://svc.example.com/f64.png",
 		"https://svc.example.com/app/favicon.ico", "https://svc.example.com/f16.png", "https://svc.example.com/apple-touch-icon.png", "https://svc.example.com/favicon.ico"}

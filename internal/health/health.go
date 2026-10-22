@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nycu-sdc/sdc-portal/internal/assets"
 	"github.com/nycu-sdc/sdc-portal/internal/model"
 	"github.com/nycu-sdc/sdc-portal/internal/store"
 )
@@ -32,7 +33,7 @@ type Checker struct {
 func New(st *store.Store, interval, timeout time.Duration, verifyTLS bool) *Checker {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: !verifyTLS} //nolint:gosec // configurable for self-signed hosts
-	return &Checker{Store: st, Interval: interval, client: &http.Client{Timeout: timeout, Transport: tr}}
+	return &Checker{Store: st, Interval: interval, client: &http.Client{Timeout: timeout, Transport: tr, CheckRedirect: assets.LimitRedirects}}
 }
 
 // Check performs one check and stores the result.
