@@ -44,6 +44,9 @@ export function Dialog({ title, onClose, children, footer, width, className, dis
   useLayoutEffect(() => {
     const d = ref.current!;
     if (!d.open) d.showModal();
+    // showModal() focuses the first focusable element; honour an explicit
+    // initial focus such as the 取消 button of a confirmation.
+    d.querySelector<HTMLElement>('[data-autofocus]')?.focus();
     pushLayer(d);
     return () => {
       popLayer(d);
@@ -167,7 +170,11 @@ export function FloatingMenu({
     const down = (e: MouseEvent) => {
       if (!ref.current?.contains(e.target as Node) && !anchor.contains(e.target as Node)) onClose();
     };
+    // Scrolling that started before the menu opened (e.g. scrolling the
+    // button into view) must not close it.
+    const openedAt = performance.now();
     const scroll = (e: Event) => {
+      if (performance.now() - openedAt < 200) return;
       if (!ref.current?.contains(e.target as Node)) onClose();
     };
     const key = (e: KeyboardEvent) => {
@@ -234,6 +241,12 @@ export function FloatingMenu({
 
 /** Shows a message at the bottom centre; errors stay longer and are red. */
 export function toast(msg: string, opts: { error?: boolean } = {}) {
+  // Placed after the current render so a dialog that is closing in the same
+  // step does not take the toast with it.
+  window.setTimeout(() => showToast(msg, opts), 40);
+}
+
+function showToast(msg: string, opts: { error?: boolean }) {
   const layer = topLayer();
   let box = layer.querySelector<HTMLDivElement>(':scope > .toasts');
   if (!box) {
@@ -302,7 +315,7 @@ export function ConfirmHost() {
       testId="confirm-dialog"
       footer={
         <>
-          <button type="button" className="btn" autoFocus onClick={() => done(false)}>
+          <button type="button" className="btn" data-autofocus onClick={() => done(false)}>
             取消
           </button>
           <button type="button" className={'btn ' + (cur.danger ? 'danger' : 'primary')} onClick={() => done(true)}>

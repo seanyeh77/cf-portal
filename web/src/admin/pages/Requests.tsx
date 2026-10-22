@@ -230,7 +230,7 @@ function RejectDialog({ req, onClose, onDone }: { req: RequestItem; onClose: () 
     >
       <div className="field">
         <label htmlFor="rj-note">原因（申請人可見）</label>
-        <textarea id="rj-note" className="input" value={note} autoFocus onChange={(e) => setNote(e.target.value)} />
+        <textarea id="rj-note" className="input" value={note} data-autofocus onChange={(e) => setNote(e.target.value)} />
       </div>
     </Dialog>
   );

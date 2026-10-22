@@ -79,7 +79,7 @@ function DeleteDialog({ r, zone }: { r: DNSRecord; zone: string }) {
       testId="delete-dialog"
       footer={
         <>
-          <button type="button" className="btn" autoFocus onClick={closeModal}>
+          <button type="button" className="btn" data-autofocus onClick={closeModal}>
             取消
           </button>
           <button type="button" className="btn danger" disabled={busy} onClick={del}>
@@ -250,7 +250,7 @@ function BulkDeleteDialog({ ids, data }: { ids: string[]; data: RecordsData }) {
       testId="bulk-delete"
       footer={
         <>
-          <button type="button" className="btn" autoFocus onClick={closeModal}>
+          <button type="button" className="btn" data-autofocus onClick={closeModal}>
             取消
           </button>
           <button type="button" className="btn danger" disabled={!sure || busy} onClick={del}>

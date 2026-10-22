@@ -169,7 +169,7 @@
 }
 .ov-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 340px);
   gap: 16px;
   align-items: start;
 }
@@ -196,6 +196,9 @@
 .issue-name {
   font-weight: 600;
   min-width: 140px;
+}
+.issue-row > .small {
+  white-space: nowrap;
 }
 .issue-count {
   font-variant-numeric: tabular-nums;
@@ -790,7 +793,7 @@ dialog.dlg.drawer {
     grid-column: 1 / -1;
   }
   .ov-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .stats {
     grid-template-columns: repeat(3, 1fr);
@@ -813,6 +816,23 @@ dialog.dlg.drawer {
   .meta-col {
     border-left: 0;
     padding-left: 0;
+  }
+  .tabs {
+    order: 3;
+    flex-basis: 100%;
+  }
+  .topbar-right {
+    margin-left: auto;
+  }
+  .issue-row {
+    gap: 10px;
+  }
+  .issue-name {
+    min-width: 0;
+    flex: 1;
+  }
+  .issue-row .spacer {
+    display: none;
   }
   .stats {
     grid-template-columns: 1fr 1fr;

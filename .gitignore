@@ -7,3 +7,5 @@
 /.env
 /data/
 *.db
+/web/e2e/.auth.json
+/web/screenshots/
