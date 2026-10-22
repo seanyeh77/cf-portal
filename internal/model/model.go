@@ -5,14 +5,8 @@ import "strings"
 
 // Record is a Cloudflare DNS record.
 type Record struct {
-	ID         string `json:"id"`
-	Type       string `json:"type"`
-	Name       string `json:"name"`
-	Content    string `json:"content"`
-	TTL        int    `json:"ttl"`
-	Proxied    bool   `json:"proxied"`
-	Priority   *int   `json:"priority"`
-	Comment    string `json:"comment"`
+	ID string `json:"id"`
+	RecordInput
 	CreatedOn  string `json:"created_on,omitempty"`
 	ModifiedOn string `json:"modified_on,omitempty"`
 }
@@ -24,14 +18,12 @@ type RecordInput struct {
 	Content  string `json:"content"`
 	TTL      int    `json:"ttl"`
 	Proxied  bool   `json:"proxied"`
-	Priority *int   `json:"priority"`
+	Priority *int   `json:"priority,omitempty"`
 	Comment  string `json:"comment"`
 }
 
 // Input returns the editable fields of r.
-func (r Record) Input() RecordInput {
-	return RecordInput{Type: r.Type, Name: r.Name, Content: r.Content, TTL: r.TTL, Proxied: r.Proxied, Priority: r.Priority, Comment: r.Comment}
-}
+func (r Record) Input() RecordInput { return r.RecordInput }
 
 // Meta is management information kept only in this system.
 type Meta struct {

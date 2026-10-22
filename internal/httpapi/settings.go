@@ -31,8 +31,9 @@ func (s *Server) settingsOut(set map[string]string) map[string]any {
 	return out
 }
 
-func (s *Server) apiGetSettings(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiGetSettings(w http.ResponseWriter, r *http.Request) error {
 	writeJSON(w, http.StatusOK, s.settingsOut(s.settings(r.Context())))
+	return nil
 }
 
 func normalizeSetting(k, v string) (string, error) {
@@ -86,10 +87,10 @@ func normalizeSetting(k, v string) (string, error) {
 	return v, nil
 }
 
-func (s *Server) apiPutSettings(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiPutSettings(w http.ResponseWriter, r *http.Request) error {
 	var b map[string]any
-	if !decode(w, r, &b) {
-		return
+	if err := decode(w, r, &b); err != nil {
+		return err
 	}
 	ctx := r.Context()
 	cur := s.settings(ctx)
@@ -112,8 +113,7 @@ func (s *Server) apiPutSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		nv, err := normalizeSetting(k, v)
 		if err != nil {
-			writeAnyErr(w, err)
-			return
+			return err
 		}
 		save[k] = nv
 		if cur[k] != nv {
@@ -121,18 +121,18 @@ func (s *Server) apiPutSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := s.Store.SetSettings(ctx, save); err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	if len(changes) > 0 {
 		s.auditLog(r, "settings_save", "網站設定", map[string]any{"changes": changes})
 	}
 	writeJSON(w, http.StatusOK, s.settingsOut(s.settings(ctx)))
+	return nil
 }
 
 func (s *Server) mediaDir() string { return s.Store.Dir + "/media" }
 
-func (s *Server) apiUploadMedia(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiUploadMedia(w http.ResponseWriter, r *http.Request) error {
 	kind := r.PathValue("kind")
 	var limit int64
 	var allowed map[string]bool
@@ -143,116 +143,112 @@ func (s *Server) apiUploadMedia(w http.ResponseWriter, r *http.Request) {
 		limit = 5 << 20
 		allowed = map[string]bool{"png": true, "jpg": true, "gif": true, "webp": true}
 	default:
-		writeErr(w, http.StatusNotFound, "not found")
-		return
+		return httpErr{http.StatusNotFound, "not found"}
 	}
 	data, err := readUpload(w, r, limit)
 	if err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	name, err := assets.Save(s.mediaDir(), kind, data, allowed)
 	if err != nil {
-		writeErr(w, http.StatusUnprocessableEntity, err.Error())
-		return
+		return httpErr{http.StatusUnprocessableEntity, err.Error()}
 	}
 	ctx := r.Context()
 	old := s.settings(ctx)[kind]
 	if err := s.Store.SetSettings(ctx, map[string]string{kind: name}); err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	if old != "" && old != name {
 		assets.Remove(s.mediaDir(), old)
 	}
 	s.auditLog(r, "media_upload", kind, map[string]any{"file": name})
 	writeJSON(w, http.StatusOK, s.settingsOut(s.settings(ctx)))
+	return nil
 }
 
-func (s *Server) apiDeleteMedia(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiDeleteMedia(w http.ResponseWriter, r *http.Request) error {
 	kind := r.PathValue("kind")
 	if kind != "logo" && kind != "hero" {
-		writeErr(w, http.StatusNotFound, "not found")
-		return
+		return httpErr{http.StatusNotFound, "not found"}
 	}
 	ctx := r.Context()
 	old := s.settings(ctx)[kind]
 	if err := s.Store.SetSettings(ctx, map[string]string{kind: ""}); err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	if old != "" {
 		assets.Remove(s.mediaDir(), old)
 		s.auditLog(r, "media_remove", kind, map[string]any{"file": old})
 	}
 	writeJSON(w, http.StatusOK, s.settingsOut(s.settings(ctx)))
+	return nil
 }
 
 // ---- snapshots ----
 
-func (s *Server) apiSnapshots(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiSnapshots(w http.ResponseWriter, r *http.Request) error {
 	list, err := s.Snaps.List()
 	if err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"snapshots": list, "keep": s.Cfg.SnapshotKeep})
+	return nil
 }
 
-func (s *Server) apiCreateSnapshot(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiCreateSnapshot(w http.ResponseWriter, r *http.Request) error {
 	info, _, err := s.Maint.Snapshot(r.Context(), "manual")
 	if err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	s.auditLog(r, "snapshot_create", info.Name, map[string]any{"count": info.Count})
 	writeJSON(w, http.StatusCreated, info)
+	return nil
 }
 
-func (s *Server) loadSnapshot(w http.ResponseWriter, r *http.Request) *snapshots.Snapshot {
+func (s *Server) loadSnapshot(r *http.Request) (*snapshots.Snapshot, error) {
 	snap, err := s.Snaps.Load(r.PathValue("name"))
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "找不到快照")
-		return nil
+		return nil, httpErr{http.StatusNotFound, "找不到快照"}
 	}
-	return snap
+	return snap, nil
 }
 
-func (s *Server) apiDownloadSnapshot(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiDownloadSnapshot(w http.ResponseWriter, r *http.Request) error {
 	name := r.PathValue("name")
-	snap := s.loadSnapshot(w, r)
-	if snap == nil {
-		return
+	snap, err := s.loadSnapshot(r)
+	if err != nil {
+		return err
 	}
 	base := strings.TrimSuffix(name, ".json")
 	if r.URL.Query().Get("format") == "zone" {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("Content-Disposition", `attachment; filename="`+s.Cfg.CFZoneName+"-"+base+`.zone"`)
 		w.Write([]byte(snapshots.BIND(snap.Zone, snap.Records, time.Unix(int64(snap.TS), 0).In(s.Cfg.Timezone))))
-		return
+		return nil
 	}
 	w.Header().Set("Content-Disposition", `attachment; filename="`+s.Cfg.CFZoneName+"-"+base+`.json"`)
 	writeJSON(w, http.StatusOK, snap)
+	return nil
 }
 
-func (s *Server) apiSnapshotDiff(w http.ResponseWriter, r *http.Request) {
-	snap := s.loadSnapshot(w, r)
-	if snap == nil {
-		return
+func (s *Server) apiSnapshotDiff(w http.ResponseWriter, r *http.Request) error {
+	snap, err := s.loadSnapshot(r)
+	if err != nil {
+		return err
 	}
 	cur, _, err := s.CF.List(r.Context(), true)
 	if err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"name": r.PathValue("name"), "ts": snap.TS, "source": snap.Source, "diff": snapshots.Compare(snap.Records, cur)})
+	return nil
 }
 
-func (s *Server) apiAudit(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiAudit(w http.ResponseWriter, r *http.Request) error {
 	rows, err := s.Store.Audit(r.Context(), 200)
 	if err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entries": rows})
+	return nil
 }

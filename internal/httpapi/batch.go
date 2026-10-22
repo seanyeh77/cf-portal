@@ -26,27 +26,24 @@ type batchResult struct {
 
 const maxBatch = 500
 
-func (s *Server) apiBatch(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiBatch(w http.ResponseWriter, r *http.Request) error {
 	var b struct {
 		Records []recordBody `json:"records"`
 		DryRun  bool         `json:"dry_run"`
 	}
-	if !decode(w, r, &b) {
-		return
+	if err := decode(w, r, &b); err != nil {
+		return err
 	}
 	if len(b.Records) == 0 {
-		writeErr(w, http.StatusUnprocessableEntity, "沒有可建立的資料")
-		return
+		return httpErr{http.StatusUnprocessableEntity, "沒有可建立的資料"}
 	}
 	if len(b.Records) > maxBatch {
-		writeErr(w, http.StatusUnprocessableEntity, "一次最多建立 500 筆")
-		return
+		return httpErr{http.StatusUnprocessableEntity, "一次最多建立 500 筆"}
 	}
 	ctx := r.Context()
 	existing, _, err := s.CF.List(ctx, true)
 	if err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	rule := s.settings(ctx)["name_rule"]
 	results := make([]batchResult, len(b.Records))
@@ -66,7 +63,7 @@ func (s *Server) apiBatch(w http.ResponseWriter, r *http.Request) {
 		} else {
 			res.OK = true
 			ok++
-			pseudo = append(pseudo, model.Record{ID: "batch-" + strconv.Itoa(i), Type: in.Type, Name: in.Name, Content: in.Content})
+			pseudo = append(pseudo, model.Record{ID: "batch-" + strconv.Itoa(i), RecordInput: model.RecordInput{Type: in.Type, Name: in.Name, Content: in.Content}})
 		}
 		metas[i] = meta
 		if msg := dnsrec.NameRuleError(in.Name, s.Cfg.CFZoneName, rule); msg != "" {
@@ -100,4 +97,5 @@ func (s *Server) apiBatch(w http.ResponseWriter, r *http.Request) {
 		s.Scanner.ScanSoon(created...)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"results": results, "ok": ok, "skipped": len(results) - ok, "created": len(created), "dry_run": b.DryRun})
+	return nil
 }

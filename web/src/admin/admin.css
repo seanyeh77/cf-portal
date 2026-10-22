@@ -290,14 +290,14 @@
   display: flex;
   align-items: center;
   gap: 18px;
+  /* Dark in both themes; tokens resolve to their dark values. */
+  color-scheme: dark;
   background: var(--bar);
-  color: var(--bar-ink);
+  color: var(--ink);
   padding: 10px 16px;
   font-size: 14px;
 }
-.bulkbar .linkbtn {
-  color: #9be7dc;
-}
+
 .table-wrap {
   overflow-x: auto;
   background: var(--surface);

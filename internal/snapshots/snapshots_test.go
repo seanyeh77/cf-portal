@@ -49,10 +49,10 @@ func TestCompare(t *testing.T) {
 		{ID: "4", RecordInput: model.RecordInput{Type: "A", Name: "d.z", Content: "10.0.0.4", TTL: 1}},
 	}
 	cur := []model.Record{
-		{ID: "1", Type: "A", Name: "a.z", Content: "10.0.0.1", TTL: 1},
-		{ID: "2", Type: "A", Name: "b.z", Content: "10.0.0.99", TTL: 300},
-		{ID: "33", Type: "CNAME", Name: "c.z", Content: "X.example.com.", TTL: 1}, // recreated
-		{ID: "5", Type: "A", Name: "e.z", Content: "10.0.0.5", TTL: 1},
+		{ID: "1", RecordInput: model.RecordInput{Type: "A", Name: "a.z", Content: "10.0.0.1", TTL: 1}},
+		{ID: "2", RecordInput: model.RecordInput{Type: "A", Name: "b.z", Content: "10.0.0.99", TTL: 300}},
+		{ID: "33", RecordInput: model.RecordInput{Type: "CNAME", Name: "c.z", Content: "X.example.com.", TTL: 1}}, // recreated
+		{ID: "5", RecordInput: model.RecordInput{Type: "A", Name: "e.z", Content: "10.0.0.5", TTL: 1}},
 	}
 	d := Compare(snap, cur)
 	if len(d.Removed) != 1 || d.Removed[0].ID != "4" {
@@ -67,7 +67,7 @@ func TestCompare(t *testing.T) {
 	if d.Changed[1].Now.ID != "33" || strings.Join(d.Changed[1].Fields, ",") != "content" {
 		t.Errorf("recreated %+v", d.Changed[1])
 	}
-	exact := []model.Record{{ID: "9", Type: "A", Name: "d.z", Content: "10.0.0.4", TTL: 1}}
+	exact := []model.Record{{ID: "9", RecordInput: model.RecordInput{Type: "A", Name: "d.z", Content: "10.0.0.4", TTL: 1}}}
 	if d := Compare(snap[3:], exact); len(d.Removed)+len(d.Added)+len(d.Changed) != 0 {
 		t.Errorf("recreated with same content must be identical: %+v", d)
 	}

@@ -4,10 +4,18 @@
   flex-direction: column;
 }
 
+/* The header, command bar and simple-page header are dark in both themes:
+   color-scheme makes the palette tokens resolve to their dark values here. */
+.hero,
+.cmd,
+.simple-head {
+  color-scheme: dark;
+}
+
 /* Header */
 .hero {
   position: relative;
-  color: #e9f1f0;
+  color: var(--ink);
   background-color: #0d1c1b;
   background-image:
     radial-gradient(600px 320px at 92% -10%, color-mix(in srgb, var(--site-accent) 38%, transparent), transparent 70%),
@@ -77,7 +85,7 @@
 }
 .site-zone {
   font-size: 12px;
-  color: #9fb4b1;
+  color: var(--muted);
 }
 .hero-actions {
   display: flex;
@@ -91,7 +99,7 @@
   padding: 4px 12px;
   border: 1px solid rgba(255, 255, 255, 0.22);
   background: rgba(255, 255, 255, 0.04);
-  color: #e9f1f0;
+  color: var(--ink);
   font-size: 13.5px;
   text-decoration: none;
   cursor: pointer;
@@ -119,7 +127,7 @@
 }
 .subtitle {
   margin: 0;
-  color: #b9cac8;
+  color: var(--muted);
   font-size: 16px;
 }
 .hero-stats {
@@ -129,7 +137,7 @@
 }
 .hero-stats dt {
   font-size: 12.5px;
-  color: #9fb4b1;
+  color: var(--muted);
 }
 .hero-stats dd {
   margin: 0;
@@ -143,12 +151,12 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #34d399;
-  box-shadow: 0 0 0 4px rgba(52, 211, 153, 0.18);
+  background: var(--ok);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 18%, transparent);
 }
 .live.warn {
-  background: #fb923c;
-  box-shadow: 0 0 0 4px rgba(251, 146, 60, 0.2);
+  background: var(--medium);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--medium) 20%, transparent);
 }
 .search {
   position: relative;
@@ -160,11 +168,11 @@
   padding: 0 70px 0 16px;
   border: 0;
   background: rgba(255, 255, 255, 0.1);
-  color: #fff;
+  color: var(--ink);
   font-size: 16px;
 }
 .search input::placeholder {
-  color: #9fb4b1;
+  color: var(--muted);
 }
 .search input:focus {
   outline: 2px solid var(--site-accent);
@@ -175,7 +183,7 @@
   right: 14px;
   top: 50%;
   transform: translateY(-50%);
-  color: #7f9693;
+  color: var(--faint);
   font-size: 12px;
   display: flex;
   gap: 4px;
@@ -197,7 +205,7 @@ kbd {
 .cats button {
   border: 0;
   background: none;
-  color: #a9bcba;
+  color: var(--muted);
   padding: 10px 0 12px;
   font-size: 14.5px;
   cursor: pointer;
@@ -205,14 +213,14 @@ kbd {
   border-bottom: 2px solid transparent;
 }
 .cats button .n {
-  color: #7f9693;
+  color: var(--faint);
   margin-left: 2px;
 }
 .cats button:hover {
-  color: #fff;
+  color: var(--ink);
 }
 .cats button.active {
-  color: #fff;
+  color: var(--ink);
   border-bottom-color: var(--site-accent);
   font-weight: 600;
 }
@@ -505,17 +513,17 @@ mark.hit {
   top: 14vh;
   transform: translateX(-50%);
   width: min(620px, calc(100vw - 32px));
-  background: #10191a;
-  color: #e9f1f0;
+  background: var(--surface);
+  color: var(--ink);
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
-  border: 1px solid #263536;
+  border: 1px solid var(--rule);
 }
 .cmd-input {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 12px 14px;
-  border-bottom: 1px solid #263536;
+  border-bottom: 1px solid var(--rule);
 }
 .colon {
   color: var(--site-accent);
@@ -527,14 +535,14 @@ mark.hit {
   flex: 1;
   border: 0;
   background: none;
-  color: #fff;
+  color: var(--ink);
   font-family: var(--mono);
   font-size: 15px;
   outline: none;
 }
 .cmd-err {
   padding: 6px 14px;
-  color: #f87171;
+  color: var(--high);
   font-family: var(--mono);
   font-size: 13px;
 }
@@ -555,22 +563,22 @@ mark.hit {
   cursor: pointer;
 }
 .cmd-list li.sel {
-  background: #1d2c2d;
+  background: var(--surface-2);
   box-shadow: inset 3px 0 0 var(--site-accent);
 }
 .cmd-list li.empty {
-  color: #7f9693;
+  color: var(--faint);
   cursor: default;
 }
 .cmd-hint {
-  color: #7f9693;
+  color: var(--faint);
   font-family: var(--font);
   font-size: 12.5px;
 }
 .cmd-foot {
   padding: 8px 14px;
-  border-top: 1px solid #263536;
-  color: #7f9693;
+  border-top: 1px solid var(--rule);
+  color: var(--faint);
   font-size: 12px;
 }
 
@@ -580,7 +588,7 @@ mark.hit {
 }
 .simple-head {
   background: #0d1c1b;
-  color: #e9f1f0;
+  color: var(--ink);
   padding: 14px 24px;
   border-bottom: 3px solid var(--site-accent);
 }

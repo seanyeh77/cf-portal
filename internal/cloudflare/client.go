@@ -220,20 +220,6 @@ func (c *Client) one(ctx context.Context, method, path string, body any) (*model
 	return &rec, nil
 }
 
-type payload struct {
-	Type     string `json:"type"`
-	Name     string `json:"name"`
-	Content  string `json:"content"`
-	TTL      int    `json:"ttl"`
-	Proxied  bool   `json:"proxied"`
-	Priority *int   `json:"priority,omitempty"`
-	Comment  string `json:"comment"`
-}
-
-func toPayload(in model.RecordInput) payload {
-	return payload{Type: in.Type, Name: in.Name, Content: in.Content, TTL: in.TTL, Proxied: in.Proxied, Priority: in.Priority, Comment: in.Comment}
-}
-
 // Get returns one record.
 func (c *Client) Get(ctx context.Context, id string) (*model.Record, error) {
 	return c.one(ctx, http.MethodGet, "/"+url.PathEscape(id), nil)
@@ -241,12 +227,12 @@ func (c *Client) Get(ctx context.Context, id string) (*model.Record, error) {
 
 // Create adds a record.
 func (c *Client) Create(ctx context.Context, in model.RecordInput) (*model.Record, error) {
-	return c.one(ctx, http.MethodPost, "", toPayload(in))
+	return c.one(ctx, http.MethodPost, "", in)
 }
 
 // Update patches a record with all editable fields.
 func (c *Client) Update(ctx context.Context, id string, in model.RecordInput) (*model.Record, error) {
-	return c.one(ctx, http.MethodPatch, "/"+url.PathEscape(id), toPayload(in))
+	return c.one(ctx, http.MethodPatch, "/"+url.PathEscape(id), in)
 }
 
 // Delete removes a record.

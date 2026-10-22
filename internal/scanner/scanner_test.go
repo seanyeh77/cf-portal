@@ -62,23 +62,23 @@ func TestCNAME(t *testing.T) {
 			w.Write([]byte("hello"))
 		})
 	ctx := context.Background()
-	r := s.Scan(ctx, model.Record{Type: "CNAME", Name: "a.z", Content: "gone.example.com"}, []int{1}, true)
+	r := s.Scan(ctx, model.Record{RecordInput: model.RecordInput{Type: "CNAME", Name: "a.z", Content: "gone.example.com"}}, []int{1}, true)
 	if r.DNSStatus != "nxdomain" || r.DNSDetail != "gone.example.com：查無網域" || r.Reachable {
 		t.Errorf("nxdomain: %+v", r)
 	}
-	r = s.Scan(ctx, model.Record{Type: "CNAME", Name: "a.z", Content: "gone.example.com"}, []int{1}, false)
+	r = s.Scan(ctx, model.Record{RecordInput: model.RecordInput{Type: "CNAME", Name: "a.z", Content: "gone.example.com"}}, []int{1}, false)
 	if r.DNSStatus != "unknown" {
 		t.Errorf("DNS unavailable must be unknown: %+v", r)
 	}
-	r = s.Scan(ctx, model.Record{Type: "CNAME", Name: "a.z", Content: "broken.example"}, []int{1}, true)
+	r = s.Scan(ctx, model.Record{RecordInput: model.RecordInput{Type: "CNAME", Name: "a.z", Content: "broken.example"}}, []int{1}, true)
 	if r.DNSStatus != "unknown" {
 		t.Errorf("temporary failure must be unknown: %+v", r)
 	}
-	r = s.Scan(ctx, model.Record{Type: "CNAME", Name: "dead.z", Content: "gone.github.io"}, []int{1}, true)
+	r = s.Scan(ctx, model.Record{RecordInput: model.RecordInput{Type: "CNAME", Name: "dead.z", Content: "gone.github.io"}}, []int{1}, true)
 	if r.DNSStatus != "unclaimed" || r.DNSDetail != "GitHub Pages：查無對應站台" {
 		t.Errorf("unclaimed: %+v", r)
 	}
-	r = s.Scan(ctx, model.Record{Type: "CNAME", Name: "live.z", Content: "live.github.io"}, []int{1}, true)
+	r = s.Scan(ctx, model.Record{RecordInput: model.RecordInput{Type: "CNAME", Name: "live.z", Content: "live.github.io"}}, []int{1}, true)
 	if r.DNSStatus != "ok" || !strings.HasPrefix(r.DNSDetail, "解析為 185.199.108.153") {
 		t.Errorf("claimed: %+v", r)
 	}
@@ -96,11 +96,11 @@ func TestProxied(t *testing.T) {
 		http.Redirect(w, r, "/elsewhere", http.StatusFound)
 	})
 	ctx := context.Background()
-	r := s.Scan(ctx, model.Record{Type: "A", Name: "down.z", Content: "1.2.3.4", Proxied: true}, []int{1}, true)
+	r := s.Scan(ctx, model.Record{RecordInput: model.RecordInput{Type: "A", Name: "down.z", Content: "1.2.3.4", Proxied: true}}, []int{1}, true)
 	if r.Reachable || r.Detail != "來源主機無法連線（HTTP 522）" {
 		t.Errorf("522: %+v", r)
 	}
-	r = s.Scan(ctx, model.Record{Type: "A", Name: "up.z", Content: "1.2.3.4", Proxied: true}, []int{1}, true)
+	r = s.Scan(ctx, model.Record{RecordInput: model.RecordInput{Type: "A", Name: "up.z", Content: "1.2.3.4", Proxied: true}}, []int{1}, true)
 	if !r.Reachable || r.Detail != "經 Cloudflare：HTTP 302" {
 		t.Errorf("redirect must not be followed: %+v", r)
 	}
@@ -124,12 +124,12 @@ func TestTCP(t *testing.T) {
 	open := ln.Addr().(*net.TCPAddr).Port
 	closed := open + 1
 	s := newScanner(t, fakeResolver{}, nil)
-	r := s.Scan(context.Background(), model.Record{Type: "A", Name: "x.z", Content: "127.0.0.1"}, []int{open, closed}, true)
+	r := s.Scan(context.Background(), model.Record{RecordInput: model.RecordInput{Type: "A", Name: "x.z", Content: "127.0.0.1"}}, []int{open, closed}, true)
 	want := "127.0.0.1：埠 " + strconv.Itoa(open) + " 有回應"
 	if !r.Reachable || r.Detail != want || r.OpenPorts != strconv.Itoa(open) {
 		t.Errorf("open: %+v", r)
 	}
-	r = s.Scan(context.Background(), model.Record{Type: "A", Name: "x.z", Content: "127.0.0.1"}, []int{closed}, true)
+	r = s.Scan(context.Background(), model.Record{RecordInput: model.RecordInput{Type: "A", Name: "x.z", Content: "127.0.0.1"}}, []int{closed}, true)
 	if r.Reachable || r.Detail != "127.0.0.1：埠 "+strconv.Itoa(closed)+" 無回應" {
 		t.Errorf("closed: %+v", r)
 	}

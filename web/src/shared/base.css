@@ -45,7 +45,6 @@
   --ok: light-dark(#047857, #34d399);
   --idle: light-dark(#8b949e, #6b7580);
   --bar: light-dark(#1c2229, #0b0e11);
-  --bar-ink: #e6e9ec;
   --shadow: 0 8px 28px light-dark(rgba(16, 24, 32, 0.14), rgba(0, 0, 0, 0.5));
   --font: 'Source Sans 3', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', system-ui, sans-serif;
   --mono: 'IBM Plex Mono', ui-monospace, 'Noto Sans Mono CJK TC', Menlo, Consolas, monospace;

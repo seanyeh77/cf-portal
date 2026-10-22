@@ -24,11 +24,10 @@ func cell(v string) string {
 	return v
 }
 
-func (s *Server) apiExportCSV(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiExportCSV(w http.ResponseWriter, r *http.Request) error {
 	z, err := s.loadZone(r.Context(), true)
 	if err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	recs := z.Records
 	sort.SliceStable(recs, func(i, j int) bool { return recs[i].Name < recs[j].Name })
@@ -67,4 +66,5 @@ func (s *Server) apiExportCSV(w http.ResponseWriter, r *http.Request) {
 		cw.Write(row)
 	}
 	cw.Flush()
+	return nil
 }

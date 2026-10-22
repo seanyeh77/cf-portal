@@ -81,9 +81,9 @@ func TestValidate(t *testing.T) {
 
 func TestConflict(t *testing.T) {
 	existing := []model.Record{
-		{ID: "1", Type: "A", Name: "gitlab.sdc.nycu.club", Content: "10.0.1.21"},
-		{ID: "2", Type: "CNAME", Name: "docs.sdc.nycu.club", Content: "sdc-docs.pages.dev"},
-		{ID: "3", Type: "TXT", Name: "gitlab.sdc.nycu.club", Content: "hello"},
+		{ID: "1", RecordInput: model.RecordInput{Type: "A", Name: "gitlab.sdc.nycu.club", Content: "10.0.1.21"}},
+		{ID: "2", RecordInput: model.RecordInput{Type: "CNAME", Name: "docs.sdc.nycu.club", Content: "sdc-docs.pages.dev"}},
+		{ID: "3", RecordInput: model.RecordInput{Type: "TXT", Name: "gitlab.sdc.nycu.club", Content: "hello"}},
 	}
 	cases := []struct {
 		in      model.RecordInput

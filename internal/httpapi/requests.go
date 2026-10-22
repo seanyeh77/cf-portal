@@ -163,12 +163,11 @@ type requestOut struct {
 	NameError string `json:"name_error"`
 }
 
-func (s *Server) apiRequests(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiRequests(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 	reqs, err := s.Store.Requests(ctx)
 	if err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	var recs []model.Record
 	set := s.settings(ctx)
@@ -179,8 +178,7 @@ func (s *Server) apiRequests(w http.ResponseWriter, r *http.Request) {
 		if q.Status == "pending" {
 			if recs == nil {
 				if recs, _, err = s.CF.List(ctx, false); err != nil {
-					writeAnyErr(w, err)
-					return
+					return err
 				}
 			}
 			in := q.Input()
@@ -196,38 +194,36 @@ func (s *Server) apiRequests(w http.ResponseWriter, r *http.Request) {
 		out = append(out, o)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"requests": out, "enabled": set["requests_enabled"] == "1"})
+	return nil
 }
 
-func (s *Server) loadRequest(w http.ResponseWriter, r *http.Request) *model.Request {
+func (s *Server) loadRequest(r *http.Request) (*model.Request, error) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "找不到申請")
-		return nil
+		return nil, httpErr{http.StatusNotFound, "找不到申請"}
 	}
 	q, err := s.Store.Request(r.Context(), id)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "找不到申請")
-		return nil
+		return nil, httpErr{http.StatusNotFound, "找不到申請"}
 	}
 	if q.Status != "pending" {
-		writeErr(w, http.StatusConflict, "此申請已處理")
-		return nil
+		return nil, httpErr{http.StatusConflict, "此申請已處理"}
 	}
-	return q
+	return q, nil
 }
 
-func (s *Server) apiApprove(w http.ResponseWriter, r *http.Request) {
-	q := s.loadRequest(w, r)
-	if q == nil {
-		return
+func (s *Server) apiApprove(w http.ResponseWriter, r *http.Request) error {
+	q, err := s.loadRequest(r)
+	if err != nil {
+		return err
 	}
 	var b struct {
 		Record *model.RecordInput `json:"record"`
 		Meta   *model.Meta        `json:"meta"`
 		Note   string             `json:"note"`
 	}
-	if !decode(w, r, &b) {
-		return
+	if err := decode(w, r, &b); err != nil {
+		return err
 	}
 	in := q.Input()
 	if b.Record != nil {
@@ -240,36 +236,34 @@ func (s *Server) apiApprove(w http.ResponseWriter, r *http.Request) {
 	note := trimLen(b.Note, 500)
 	rec, _, err := s.createRecord(r, in, meta, true, "request_approve", map[string]any{"request_id": q.ID, "note": note})
 	if err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	if err := s.Store.DecideRequest(r.Context(), q.ID, "approved", note, &rec.ID); err != nil && !errors.Is(err, store.ErrNotFound) {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"record": rec})
+	return nil
 }
 
-func (s *Server) apiReject(w http.ResponseWriter, r *http.Request) {
-	q := s.loadRequest(w, r)
-	if q == nil {
-		return
+func (s *Server) apiReject(w http.ResponseWriter, r *http.Request) error {
+	q, err := s.loadRequest(r)
+	if err != nil {
+		return err
 	}
 	var b struct {
 		Note string `json:"note"`
 	}
-	if !decode(w, r, &b) {
-		return
+	if err := decode(w, r, &b); err != nil {
+		return err
 	}
 	note := trimLen(b.Note, 500)
 	if note == "" {
-		writeErr(w, http.StatusUnprocessableEntity, "請填寫駁回原因")
-		return
+		return httpErr{http.StatusUnprocessableEntity, "請填寫駁回原因"}
 	}
 	if err := s.Store.DecideRequest(r.Context(), q.ID, "rejected", note, nil); err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	s.auditLog(r, "request_reject", q.Name, map[string]any{"request_id": q.ID, "note": note})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	return nil
 }

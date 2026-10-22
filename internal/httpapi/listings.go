@@ -85,27 +85,24 @@ func cleanListing(b listingBody) (listingBody, error) {
 	return b, nil
 }
 
-func (s *Server) apiPutListing(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiPutListing(w http.ResponseWriter, r *http.Request) error {
 	id := r.PathValue("id")
 	var b listingBody
-	if !decode(w, r, &b) {
-		return
+	if err := decode(w, r, &b); err != nil {
+		return err
 	}
 	b, err := cleanListing(b)
 	if err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	ctx := r.Context()
 	rec, err := s.CF.Get(ctx, id)
 	if err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	prev, err := s.Store.Listing(ctx, id)
 	if err != nil && err != store.ErrNotFound {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	l := model.Listing{RecordID: id, Hostname: rec.Name, Title: b.Title, Description: b.Description, Category: b.Category,
 		SortOrder: b.SortOrder, Featured: b.Featured, Tags: strings.Join(b.Tags, ","), Icon: b.Icon}
@@ -124,8 +121,7 @@ func (s *Server) apiPutListing(w http.ResponseWriter, r *http.Request) {
 		l.IconFile = nil
 	case b.Icon == "upload":
 		if prev == nil || prev.Icon != "upload" || prev.IconFile == nil {
-			writeErr(w, http.StatusUnprocessableEntity, "請先上傳圖片")
-			return
+			return httpErr{http.StatusUnprocessableEntity, "請先上傳圖片"}
 		}
 	case b.Icon == "auto":
 		urlChanged := prev == nil || prev.EffectiveURL() != l.EffectiveURL()
@@ -147,8 +143,7 @@ func (s *Server) apiPutListing(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := s.Store.PutListing(ctx, l); err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	if oldFile != nil && (l.IconFile == nil || *l.IconFile != *oldFile) {
 		s.removeIconFile(ctx, oldFile)
@@ -159,6 +154,7 @@ func (s *Server) apiPutListing(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Health.CheckSoon(l)
 	s.writeListing(w, r, id, map[string]any{"icon_error": iconErr})
+	return nil
 }
 
 // writeListing answers with the listing as stored now, plus extra fields.
@@ -206,17 +202,16 @@ func (s *Server) retryIcons(ctx context.Context) {
 	}
 }
 
-func (s *Server) apiRefreshIcon(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiRefreshIcon(w http.ResponseWriter, r *http.Request) error {
 	l, err := s.Store.Listing(r.Context(), r.PathValue("id"))
 	if err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	if err := s.fetchAutoIcon(*l); err != nil {
-		writeErr(w, http.StatusUnprocessableEntity, "找不到可用的圖示："+err.Error())
-		return
+		return httpErr{http.StatusUnprocessableEntity, "找不到可用的圖示：" + err.Error()}
 	}
 	s.writeListing(w, r, l.RecordID, nil)
+	return nil
 }
 
 // fileTooLarge reports an upload over its limit (HTTP 413).
@@ -252,45 +247,41 @@ func humanSize(n int64) string {
 	return strconv.FormatInt(n>>10, 10) + " KB"
 }
 
-func (s *Server) apiUploadIcon(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiUploadIcon(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 	l, err := s.Store.Listing(ctx, r.PathValue("id"))
 	if err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	data, err := readUpload(w, r, 1<<20)
 	if err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	name, err := assets.Save(s.Icons.Dir, "up-"+l.RecordID, data, nil)
 	if err != nil {
-		writeErr(w, http.StatusUnprocessableEntity, err.Error())
-		return
+		return httpErr{http.StatusUnprocessableEntity, err.Error()}
 	}
 	old := l.IconFile
 	if err := s.Store.SetListingIcon(ctx, l.RecordID, "upload", &name); err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	s.removeIconFile(ctx, old)
 	s.auditLog(r, "icon_upload", l.Hostname, map[string]any{"record_id": l.RecordID, "file": name})
 	s.writeListing(w, r, l.RecordID, nil)
+	return nil
 }
 
-func (s *Server) apiDeleteListing(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiDeleteListing(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 	l, err := s.Store.Listing(ctx, r.PathValue("id"))
 	if err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	if err := s.Store.DeleteListing(ctx, l.RecordID); err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	s.removeIconFile(ctx, l.IconFile)
 	s.auditLog(r, "listing_remove", l.Hostname, map[string]any{"record_id": l.RecordID, "title": l.Title})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	return nil
 }

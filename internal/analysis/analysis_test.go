@@ -15,7 +15,7 @@ var (
 )
 
 func rec(id, typ, name, content string) model.Record {
-	return model.Record{ID: id, Type: typ, Name: name + "." + zone, Content: content, TTL: 1}
+	return model.Record{ID: id, RecordInput: model.RecordInput{Type: typ, Name: name + "." + zone, Content: content, TTL: 1}}
 }
 
 type fixture struct {

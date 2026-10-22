@@ -102,12 +102,11 @@ func (z *zoneState) out(r model.Record) recordOut {
 	return o
 }
 
-func (s *Server) apiRecords(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiRecords(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 	z, err := s.loadZone(ctx, r.URL.Query().Get("fresh") == "1")
 	if err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	out := make([]recordOut, 0, len(z.Records))
 	present := map[string]bool{}
@@ -142,6 +141,7 @@ func (s *Server) apiRecords(w http.ResponseWriter, r *http.Request) {
 		"settings": map[string]string{"zombie_days": set["zombie_days"], "expiry_warn_days": set["expiry_warn_days"], "scan_ports": set["scan_ports"],
 			"name_rule_hint": set["name_rule_hint"], "name_rule": set["name_rule"], "requests_enabled": set["requests_enabled"]},
 	})
+	return nil
 }
 
 // ---- meta validation ----
@@ -349,86 +349,53 @@ func (s *Server) checkNameRule(ctx context.Context, name string) error {
 	return nil
 }
 
-func (s *Server) apiCreateRecord(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiCreateRecord(w http.ResponseWriter, r *http.Request) error {
 	var b recordBody
-	if !decode(w, r, &b) {
-		return
+	if err := decode(w, r, &b); err != nil {
+		return err
 	}
 	rec, scanning, err := s.createRecord(r, b.RecordInput, b.Meta, true, "record_create", nil)
 	if err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"record": rec, "scanning": scanning})
+	return nil
 }
 
-type updateBody struct {
-	Type     *string          `json:"type"`
-	Name     *string          `json:"name"`
-	Content  *string          `json:"content"`
-	TTL      *int             `json:"ttl"`
-	Proxied  *bool            `json:"proxied"`
-	Priority *int             `json:"priority"`
-	Comment  *string          `json:"comment"`
-	Meta     *model.MetaPatch `json:"meta"`
-}
-
-// apply overlays the sent DNS fields on in.
-func (b updateBody) apply(in model.RecordInput) model.RecordInput {
-	if b.Type != nil {
-		in.Type = *b.Type
-	}
-	if b.Name != nil {
-		in.Name = *b.Name
-	}
-	if b.Content != nil {
-		in.Content = *b.Content
-	}
-	if b.TTL != nil {
-		in.TTL = *b.TTL
-	}
-	if b.Proxied != nil {
-		in.Proxied = *b.Proxied
-	}
-	if b.Priority != nil {
-		in.Priority = b.Priority
-	}
-	if b.Comment != nil {
-		in.Comment = *b.Comment
-	}
-	return in
-}
-
-func (s *Server) apiUpdateRecord(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiUpdateRecord(w http.ResponseWriter, r *http.Request) error {
 	id := r.PathValue("id")
-	var b updateBody
-	if !decode(w, r, &b) {
-		return
-	}
 	ctx := r.Context()
 	cur, err := s.CF.Get(ctx, id)
 	if err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	before := cur.Input()
-	in := b.apply(before)
+	// Decoding over the current values changes only the fields sent. The
+	// priority is copied first: JSON decodes into an existing pointer.
+	b := struct {
+		model.RecordInput
+		Meta *model.MetaPatch `json:"meta"`
+	}{RecordInput: before}
+	if before.Priority != nil {
+		b.Priority = new(*before.Priority)
+	}
+	if err := decode(w, r, &b); err != nil {
+		return err
+	}
+	in := b.RecordInput
 	dnsChanged := len(model.ChangedFields(in, before)) > 0
 	if dnsChanged {
 		if !dnsrec.Editable[cur.Type] {
-			writeErr(w, http.StatusUnprocessableEntity, cur.Type+" 請於 Cloudflare 編輯")
-			return
+			return httpErr{http.StatusUnprocessableEntity, cur.Type + " 請於 Cloudflare 編輯"}
 		}
 		if err := dnsrec.Validate(&in, s.Cfg.CFZoneName); err != nil {
-			writeAnyErr(w, err)
-			return
+			return err
 		}
 		// Normalization can turn a sent change back into the current value.
 		dnsChanged = len(model.ChangedFields(in, before)) > 0
 		if !strings.EqualFold(in.Name, before.Name) {
 			if err := s.checkNameRule(ctx, in.Name); err != nil {
-				writeAnyErr(w, err)
-				return
+				return err
 			}
 		}
 	}
@@ -438,8 +405,7 @@ func (s *Server) apiUpdateRecord(w http.ResponseWriter, r *http.Request) {
 	}
 	metaBefore, metaAfter, err := s.nextMeta(ctx, id, change)
 	if err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	rec, scanning := cur, false
 	if dnsChanged {
@@ -450,10 +416,10 @@ func (s *Server) apiUpdateRecord(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"record": rec, "dns_changed": dnsChanged, "scanning": scanning})
+	return nil
 }
 
 // forget removes local data of a deleted record, including icon files,
@@ -493,17 +459,16 @@ func (s *Server) deleteRecord(r *http.Request, rec model.Record, action string) 
 	return nil
 }
 
-func (s *Server) apiDeleteRecord(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiDeleteRecord(w http.ResponseWriter, r *http.Request) error {
 	rec, err := s.CF.Get(r.Context(), r.PathValue("id"))
 	if err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	if err := s.deleteRecord(r, *rec, "record_delete"); err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	return nil
 }
 
 // cachedRecord finds a record in the (possibly cached) zone list.
@@ -528,36 +493,35 @@ func (s *Server) recordName(ctx context.Context, id string) string {
 	return id
 }
 
-func (s *Server) apiPutMeta(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiPutMeta(w http.ResponseWriter, r *http.Request) error {
 	var p model.MetaPatch
-	if !decode(w, r, &p) {
-		return
+	if err := decode(w, r, &p); err != nil {
+		return err
 	}
-	s.replaceMeta(w, r, r.PathValue("id"), p.Apply, nil)
+	return s.replaceMeta(w, r, r.PathValue("id"), p.Apply, nil)
 }
 
 // replaceMeta applies change to a record's meta and saves it. The record
 // comes from the cached zone list; meta for unknown records is refused.
-func (s *Server) replaceMeta(w http.ResponseWriter, r *http.Request, id string, change func(model.Meta) model.Meta, extra map[string]any) {
+func (s *Server) replaceMeta(w http.ResponseWriter, r *http.Request, id string, change func(model.Meta) model.Meta, extra map[string]any) error {
 	ctx := r.Context()
 	rec, err := s.cachedRecord(ctx, id)
 	if err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	before, after, err := s.nextMeta(ctx, id, change)
 	if err == nil {
 		err = s.putMeta(r, *rec, before, after, extra)
 	}
 	if err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	scanning := reenabled(before, after) && s.Scanner.ScanSoon(*rec)
 	writeJSON(w, http.StatusOK, map[string]any{"meta": after, "scanning": scanning})
+	return nil
 }
 
-func (s *Server) apiHistory(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiHistory(w http.ResponseWriter, r *http.Request) error {
 	id := r.PathValue("id")
 	name := r.URL.Query().Get("name")
 	if name == "" {
@@ -565,37 +529,34 @@ func (s *Server) apiHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := s.Store.AuditForRecord(r.Context(), id, name)
 	if err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entries": rows})
+	return nil
 }
 
-func (s *Server) apiBulkMeta(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiBulkMeta(w http.ResponseWriter, r *http.Request) error {
 	var b struct {
 		IDs []string        `json:"ids"`
 		Set model.MetaPatch `json:"set"`
 	}
-	if !decode(w, r, &b) {
-		return
+	if err := decode(w, r, &b); err != nil {
+		return err
 	}
 	if len(b.IDs) == 0 {
-		writeErr(w, http.StatusUnprocessableEntity, "未選擇任何 record")
-		return
+		return httpErr{http.StatusUnprocessableEntity, "未選擇任何 record"}
 	}
 	ctx := r.Context()
 	all, err := s.Store.AllMeta(ctx)
 	if err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	befores := map[string]model.Meta{}
 	afters := map[string]model.Meta{}
 	for _, id := range b.IDs {
 		after, err := cleanMeta(b.Set.Apply(all[id]))
 		if err != nil {
-			writeAnyErr(w, err)
-			return
+			return err
 		}
 		befores[id], afters[id] = all[id], after
 	}
@@ -607,13 +568,13 @@ func (s *Server) apiBulkMeta(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if err := s.Store.PutMeta(ctx, id, afters[id]); err != nil {
-			writeAnyErr(w, err)
-			return
+			return err
 		}
 		s.auditLog(r, "bulk_meta", s.recordName(ctx, id), map[string]any{"record_id": id, "meta_before": befores[id], "meta_after": afters[id]})
 		changed++
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"updated": changed})
+	return nil
 }
 
 type itemResult struct {
@@ -623,21 +584,19 @@ type itemResult struct {
 	Error string `json:"error,omitempty"`
 }
 
-func (s *Server) apiBulkDelete(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiBulkDelete(w http.ResponseWriter, r *http.Request) error {
 	var b struct {
 		IDs []string `json:"ids"`
 	}
-	if !decode(w, r, &b) {
-		return
+	if err := decode(w, r, &b); err != nil {
+		return err
 	}
 	if len(b.IDs) == 0 {
-		writeErr(w, http.StatusUnprocessableEntity, "未選擇任何 record")
-		return
+		return httpErr{http.StatusUnprocessableEntity, "未選擇任何 record"}
 	}
 	info, recs, err := s.Maint.Snapshot(r.Context(), "manual")
 	if err != nil {
-		writeErr(w, http.StatusBadGateway, "無法建立快照，已取消刪除："+err.Error())
-		return
+		return httpErr{http.StatusBadGateway, "無法建立快照，已取消刪除：" + err.Error()}
 	}
 	s.auditLog(r, "snapshot_create", info.Name, map[string]any{"reason": "bulk_delete", "count": info.Count})
 	byID := map[string]model.Record{}
@@ -663,24 +622,23 @@ func (s *Server) apiBulkDelete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"results": results, "deleted": okN, "failed": len(b.IDs) - okN, "snapshot": info.Name})
+	return nil
 }
 
-func (s *Server) apiMute(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiMute(w http.ResponseWriter, r *http.Request) error {
 	var b struct {
 		RecordID string `json:"record_id"`
 		Kind     string `json:"kind"`
 		Muted    bool   `json:"muted"`
 	}
-	if !decode(w, r, &b) {
-		return
+	if err := decode(w, r, &b); err != nil {
+		return err
 	}
 	if _, ok := analysis.KindByKey[b.Kind]; !ok || b.RecordID == "" {
-		writeErr(w, http.StatusUnprocessableEntity, "未知的項目")
-		return
+		return httpErr{http.StatusUnprocessableEntity, "未知的項目"}
 	}
 	if err := s.Store.SetMute(r.Context(), b.RecordID, b.Kind, b.Muted); err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	action := "issue_mute"
 	if !b.Muted {
@@ -688,19 +646,21 @@ func (s *Server) apiMute(w http.ResponseWriter, r *http.Request) {
 	}
 	s.auditLog(r, action, s.recordName(r.Context(), b.RecordID), map[string]any{"record_id": b.RecordID, "kind": b.Kind, "label": analysis.KindByKey[b.Kind].Label})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	return nil
 }
 
-func (s *Server) apiScan(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiScan(w http.ResponseWriter, r *http.Request) error {
 	started := s.Scanner.Trigger()
 	writeJSON(w, http.StatusAccepted, map[string]any{"started": started, "scan": s.Scanner.Status()})
+	return nil
 }
 
-func (s *Server) apiScanOne(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiScanOne(w http.ResponseWriter, r *http.Request) error {
 	rec, err := s.CF.Get(r.Context(), r.PathValue("id"))
 	if err != nil {
-		writeAnyErr(w, err)
-		return
+		return err
 	}
 	s.Scanner.ScanSoon(*rec)
 	writeJSON(w, http.StatusAccepted, map[string]any{"started": true})
+	return nil
 }

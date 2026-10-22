@@ -585,3 +585,17 @@ func TestBulkMetaAuditedPerRecord(t *testing.T) {
 		t.Fatalf("history of a bulk-edited record: %v", hist)
 	}
 }
+
+func TestUpdateOnlySentFields(t *testing.T) {
+	e := newEnv(t)
+	e.login()
+	mx := e.mock.Find("MX", mockcf.Zone)
+	e.mustOK(e.do("PATCH", "/api/records/"+mx.ID, map[string]any{"priority": 20}))
+	got := e.mock.Find("MX", mockcf.Zone)
+	if got.Priority == nil || *got.Priority != 20 || got.Content != "mail.example.com" {
+		t.Fatalf("priority change lost or other fields changed: %+v", got)
+	}
+	if a := e.audits()[0]; a["action"] != "record_update" {
+		t.Fatalf("priority change not recorded as an update: %v", a)
+	}
+}

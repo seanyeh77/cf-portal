@@ -76,7 +76,14 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /admin", s.pageAdmin)
 	m.HandleFunc("GET /admin/", s.pageAdmin)
 	// api
-	api := func(pattern string, h http.HandlerFunc) { m.Handle(pattern, s.requireAdmin(h)) }
+	// API handlers return their error; it is written once here.
+	api := func(pattern string, h func(http.ResponseWriter, *http.Request) error) {
+		m.Handle(pattern, s.requireAdmin(func(w http.ResponseWriter, r *http.Request) {
+			if err := h(w, r); err != nil {
+				writeAnyErr(w, err)
+			}
+		}))
+	}
 	api("GET /api/records", s.apiRecords)
 	api("POST /api/records", s.apiCreateRecord)
 	api("PATCH /api/records/{id}", s.apiUpdateRecord)
@@ -176,13 +183,24 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
+// httpErr is an error answered with a given status and message.
+type httpErr struct {
+	status int
+	msg    string
+}
+
+func (e httpErr) Error() string { return e.msg }
+
 // writeAnyErr maps known error types to status codes.
 func writeAnyErr(w http.ResponseWriter, err error) {
 	var ve *dnsrec.ValidationError
 	var ce *dnsrec.ConflictError
 	var cfe *cloudflare.Error
 	var tooBig *http.MaxBytesError
+	var he httpErr
 	switch {
+	case errors.As(err, &he):
+		writeErr(w, he.status, he.msg)
 	case errors.As(err, new(fileTooLarge)):
 		writeErr(w, http.StatusRequestEntityTooLarge, err.Error())
 	case errors.As(err, &tooBig):
@@ -204,16 +222,12 @@ func writeAnyErr(w http.ResponseWriter, err error) {
 // maxJSONBody limits JSON request bodies; uploads set their own limits.
 const maxJSONBody = 4 << 20
 
-func decode(w http.ResponseWriter, r *http.Request, v any) bool {
+func decode(w http.ResponseWriter, r *http.Request, v any) error {
 	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxJSONBody)).Decode(v)
-	if err == nil {
-		return true
+	if err != nil && !errors.As(err, new(*http.MaxBytesError)) {
+		return &dnsrec.ValidationError{Msg: "請求格式錯誤：" + err.Error()}
 	}
-	if !errors.As(err, new(*http.MaxBytesError)) {
-		err = &dnsrec.ValidationError{Msg: "請求格式錯誤：" + err.Error()}
-	}
-	writeAnyErr(w, err)
-	return false
+	return err
 }
 
 func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
