@@ -19,11 +19,6 @@ export function useRecords() {
   });
 }
 
-/** Ids whose connection check the server is still running. */
-export function pendingIds(data: RecordsData) {
-  return new Set(data.scan.pending);
-}
-
 export async function refreshRecords(fresh = false) {
   if (fresh) {
     const d = await api<RecordsData>('GET', '/api/records?fresh=1');
@@ -32,19 +27,13 @@ export async function refreshRecords(fresh = false) {
   await queryClient.invalidateQueries();
 }
 
-/**
- * Runs a mutation: on success shows okMsg (if any) and refreshes all data;
- * on failure shows the error. Resolves to the result, or undefined on error.
- */
-export async function act<T>(fn: () => Promise<T>, okMsg?: string | ((res: T) => string)): Promise<T | undefined> {
+/** Runs a mutation, then shows okMsg and refreshes all data; shows the error on failure. */
+export async function act(fn: () => Promise<unknown>, okMsg: string) {
   try {
-    const res = await fn();
-    const msg = typeof okMsg === 'function' ? okMsg(res) : okMsg;
-    if (msg) toast(msg);
+    await fn();
+    toast(okMsg);
     await refreshRecords();
-    return res;
   } catch (e) {
     toast(errMsg(e), { error: true });
-    return undefined;
   }
 }

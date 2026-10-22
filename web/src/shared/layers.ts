@@ -29,3 +29,17 @@ export function onLayerChange(fn: () => void) {
     listeners.delete(fn);
   };
 }
+
+/**
+ * Keeps a floating element inside the top-most layer: in the open modal
+ * dialog (so its backdrop does not cover the element), back in <body> once
+ * that dialog closes.
+ */
+export function keepInTopLayer(el: HTMLElement) {
+  const place = () => {
+    const layer = topLayer();
+    if (el.parentElement !== layer) layer.appendChild(el);
+  };
+  place();
+  onLayerChange(place);
+}

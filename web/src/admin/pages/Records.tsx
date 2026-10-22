@@ -1,8 +1,8 @@
-import { Fragment, memo, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Fragment, memo, useEffect, useMemo, type ReactNode } from 'react';
 import { api, errMsg } from '../../shared/api';
 import { addMonth, relTime, semesterEnd } from '../../shared/format';
 import { MenuButton, Tip, toast, type MenuItem } from '../../shared/ui';
-import { act, pendingIds, refreshRecords, useRecords } from '../lib/data';
+import { act, refreshRecords, useRecords } from '../lib/data';
 import {
   describeFilters,
   dotState,
@@ -27,6 +27,7 @@ import {
   modalStore,
   openDrawer,
   openEditor,
+  useNow,
   selectionStore,
   setFilters,
   useStore,
@@ -140,13 +141,10 @@ function SortHead({ k, label, sort, tip }: { k: SortKey; label: string; sort: { 
   );
 }
 
-function useNow(interval = 30000) {
-  const [now, setNow] = useState(() => Date.now() / 1000);
-  useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now() / 1000), interval);
-    return () => window.clearInterval(t);
-  }, [interval]);
-  return now;
+/** The connection dot; reads the shared clock so rows need not re-render. */
+function ConnDot({ r, pending }: { r: DNSRecord; pending: boolean }) {
+  const dot = dotState(r, pending, useNow());
+  return <span className={'dot ' + dot.state} data-tip={dot.tip || undefined} tabIndex={dot.tip ? 0 : undefined} aria-label={dot.tip || undefined} />;
 }
 
 /** One table row. Memoized: polling keeps unchanged record objects stable. */
@@ -158,7 +156,6 @@ const Row = memo(function Row({
   selected,
   pending,
   showExpiry,
-  now,
 }: {
   r: DNSRecord;
   zone: string;
@@ -167,10 +164,8 @@ const Row = memo(function Row({
   selected: boolean;
   pending: boolean;
   showExpiry: boolean;
-  now: number;
 }) {
   const lv = rowLevel(r);
-  const dot = dotState(r, pending, now);
   const s = sub(r.name, zone);
   const unassigned = !r.meta.owner.trim();
   const metaLine = [r.meta.purpose, r.meta.owner].filter(Boolean).join(' · ');
@@ -239,7 +234,7 @@ const Row = memo(function Row({
       </td>
       <td className="c-target">
         <div className="target-line">
-          <span className={'dot ' + dot.state} data-tip={dot.tip || undefined} tabIndex={dot.tip ? 0 : undefined} aria-label={dot.tip || undefined} />
+          <ConnDot r={r} pending={pending} />
           <span className="mono target" data-tip={r.content.length > 34 ? r.content : undefined}>
             {r.type === 'MX' && r.priority != null ? `${r.priority} ` : ''}
             {r.content}
@@ -276,7 +271,7 @@ const Row = memo(function Row({
 function RecordsView({ data }: { data: RecordsData }) {
   const view = useStore(viewStore);
   const selection = useStore(selectionStore);
-  const pending = useMemo(() => pendingIds(data), [data]);
+  const pending = useMemo(() => new Set(data.scan.pending), [data]);
   const now = useNow();
   const warn = +data.settings.expiry_warn_days || 14;
   const f = view.filters;
@@ -339,7 +334,6 @@ function RecordsView({ data }: { data: RecordsData }) {
       selected={selection.has(r.id)}
       pending={pending.has(r.id)}
       showExpiry={showExpiry}
-      now={now}
     />
   );
 

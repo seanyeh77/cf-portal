@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { onLayerChange, popLayer, pushLayer, topLayer } from './layers';
+import { keepInTopLayer, onLayerChange, popLayer, pushLayer, topLayer } from './layers';
 
 /** A circular "?" that shows its help text on hover, focus or click. */
 export function Tip({ text, label = '說明' }: { text: string; label?: string }) {
@@ -248,13 +248,8 @@ function toastHost() {
     toastBox.className = 'toasts';
     toastBox.setAttribute('role', 'status');
     toastBox.setAttribute('aria-live', 'polite');
-    // Keep the box in the top-most layer: inside the open modal dialog (so
-    // the backdrop does not cover it), back in <body> when that dialog closes.
-    onLayerChange(() => {
-      if (toastBox!.parentElement !== topLayer()) topLayer().appendChild(toastBox!);
-    });
+    keepInTopLayer(toastBox);
   }
-  if (toastBox.parentElement !== topLayer()) topLayer().appendChild(toastBox);
   return toastBox;
 }
 

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
@@ -48,7 +47,7 @@ type Server struct {
 func New(cfg *config.Config, cf *cloudflare.Client, st *store.Store, sc *scanner.Scanner, mt *scanner.Maint, hc *health.Checker, icons *assets.Fetcher, snaps *snapshots.Store) *Server {
 	s := &Server{Cfg: cfg, CF: cf, Store: st, Scanner: sc, Maint: mt, Health: hc, Icons: icons, Snaps: snaps,
 		Assets: webui.Assets, Now: time.Now, signer: auth.Signer{Key: []byte(cfg.SecretKey)}, throttle: newThrottle()}
-	mt.Forget = s.forget
+	mt.Forget = func(ctx context.Context, id string) { s.forget(ctx, id) }
 	mt.RetryIcons = s.retryIcons
 	s.routes()
 	return s
@@ -185,7 +184,7 @@ func writeAnyErr(w http.ResponseWriter, err error) {
 	var tooBig *http.MaxBytesError
 	switch {
 	case errors.As(err, &tooBig):
-		writeErr(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("請求內容超過 %d MB", tooBig.Limit>>20))
+		writeErr(w, http.StatusRequestEntityTooLarge, "請求內容超過 "+humanSize(tooBig.Limit))
 	case errors.As(err, &ve):
 		writeErr(w, http.StatusUnprocessableEntity, ve.Msg)
 	case errors.As(err, &ce):

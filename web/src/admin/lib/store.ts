@@ -77,3 +77,11 @@ export const openDrawer = (id: string) => drawerStore.set(id);
 export const closeModal = () => modalStore.set(null);
 
 export const selectionStore = createStore<Set<string>>(new Set());
+
+// ---- shared clock for relative times ----
+
+export const nowStore = createStore(Date.now() / 1000);
+window.setInterval(() => nowStore.set(Date.now() / 1000), 30000);
+
+/** Seconds since the epoch, updated every 30 s. */
+export const useNow = () => useStore(nowStore);

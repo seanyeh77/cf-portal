@@ -1,4 +1,4 @@
-import { topLayer } from './layers';
+import { keepInTopLayer } from './layers';
 
 // One tooltip for the whole document. Any element with data-tip shows it on
 // hover and keyboard focus; elements with the tip-icon class also toggle it
@@ -42,9 +42,8 @@ export function showTip(target: HTMLElement) {
     el.className = 'tooltip';
     el.setAttribute('role', 'tooltip');
     el.id = 'cfp-tooltip';
+    keepInTopLayer(el);
   }
-  const layer = topLayer();
-  if (el.parentElement !== layer) layer.appendChild(el);
   el.textContent = text;
   el.hidden = false;
   if (current && current !== target) current.removeAttribute('aria-describedby');

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/csv"
+	"github.com/nycu-sdc/sdc-portal/internal/model"
 	"net/http"
 	"sort"
 	"strconv"
@@ -61,8 +62,8 @@ func (s *Server) apiExportCSV(w http.ResponseWriter, r *http.Request) {
 		}
 		ttl := strconv.Itoa(rec.TTL)
 		content := rec.Content
-		if rec.Type == "MX" && rec.Priority != nil {
-			content = strconv.Itoa(*rec.Priority) + " " + content
+		if p := model.Priority(rec.Priority); rec.Type == "MX" && p >= 0 {
+			content = strconv.Itoa(p) + " " + content
 		}
 		row := []string{rec.Name, rec.Type, content, boolStr(rec.Proxied), ttl, rec.Comment, o.Meta.Owner, o.Meta.Purpose, o.Meta.Notes,
 			o.Meta.ExpiresAt, boolStr(o.Meta.AutoDelete), boolStr(o.Meta.NoScan), title, cat, o.Group, reachable, lastOK, strings.Join(issues, "；")}

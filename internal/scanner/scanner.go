@@ -91,10 +91,12 @@ type Scanner struct {
 	// HTTPBase overrides https://<name> for tests.
 	HTTPBase func(name, scheme string) string
 
-	http     *http.Client
+	http *http.Client
+	// sem bounds concurrent probes across full scans and ScanSoon.
+	sem      chan struct{}
 	mu       sync.Mutex
 	st       Status
-	inflight map[string]bool
+	inflight map[string]int // queued single-record scans per id
 }
 
 // New returns a scanner.
@@ -102,7 +104,8 @@ func New(cf *cloudflare.Client, st *store.Store, timeout, interval time.Duration
 	// Probes never trust content, so certificates are not verified.
 	return &Scanner{CF: cf, Store: st, Resolver: net.DefaultResolver, Timeout: timeout, Canary: canary, Interval: interval, Ports: ports,
 		http: httpclient.New(max(timeout*2, 5*time.Second), false, httpclient.NoRedirects),
-		st:   Status{DNSOK: true, Interval: int(interval.Seconds())}}
+		sem:  make(chan struct{}, concurrency), inflight: map[string]int{},
+		st: Status{DNSOK: true, Interval: int(interval.Seconds())}}
 }
 
 // Status returns a copy of the scanner state.
@@ -197,6 +200,21 @@ func (s *Scanner) dnsWorks(ctx context.Context) bool {
 	return err == nil
 }
 
+// scanEach probes recs on the shared worker pool and waits for them.
+func (s *Scanner) scanEach(ctx context.Context, recs []model.Record, ports []int, dnsOK bool) {
+	var wg sync.WaitGroup
+	for _, r := range recs {
+		wg.Add(1)
+		s.sem <- struct{}{}
+		go func(r model.Record) {
+			defer wg.Done()
+			defer func() { <-s.sem }()
+			s.scanAndStore(ctx, r, ports, dnsOK)
+		}(r)
+	}
+	wg.Wait()
+}
+
 func (s *Scanner) scanAll(ctx context.Context) (int, bool, error) {
 	recs, _, err := s.CF.List(ctx, true)
 	if err != nil {
@@ -206,82 +224,68 @@ func (s *Scanner) scanAll(ctx context.Context) (int, bool, error) {
 	if err != nil {
 		return 0, true, err
 	}
-	dnsOK := s.dnsWorks(ctx)
-	ports := s.Ports(ctx)
+	var todo []model.Record
 	keep := map[string]bool{}
-	sem := make(chan struct{}, concurrency)
-	var wg sync.WaitGroup
-	n := 0
 	for _, r := range recs {
-		if !Eligible(r, meta[r.ID]) {
-			continue
+		if Eligible(r, meta[r.ID]) {
+			todo = append(todo, r)
+			keep[r.ID] = true
 		}
-		keep[r.ID] = true
-		n++
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(r model.Record) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			s.scanAndStore(ctx, r, ports, dnsOK)
-		}(r)
 	}
-	wg.Wait()
-	if err := s.Store.PruneScans(ctx, keep); err != nil {
-		return n, dnsOK, err
+	dnsOK := s.dnsWorks(ctx)
+	s.scanEach(ctx, todo, s.Ports(ctx), dnsOK)
+	// Records created after the list was taken may have results already.
+	s.mu.Lock()
+	for id := range s.inflight {
+		keep[id] = true
 	}
-	return n, dnsOK, nil
+	s.mu.Unlock()
+	return len(todo), dnsOK, s.Store.PruneScans(ctx, keep)
 }
 
-// ScanSoon scans the given records in the background and returns the ids
-// actually queued (records that are scannable and not excluded by meta).
-// Queued ids show up in Status().Pending until their result is stored.
-func (s *Scanner) ScanSoon(recs ...model.Record) []string {
-	meta, err := s.Store.AllMeta(context.Background())
+// ScanSoon scans the given records in the background and reports whether
+// any was queued (scannable and not excluded by meta). Queued ids show up
+// in Status().Pending until their result is stored.
+func (s *Scanner) ScanSoon(recs ...model.Record) bool {
+	ctx := context.Background()
+	var meta map[string]model.Meta
+	var err error
+	if len(recs) == 1 {
+		var m model.Meta
+		m, err = s.Store.Meta(ctx, recs[0].ID)
+		meta = map[string]model.Meta{recs[0].ID: m}
+	} else {
+		meta, err = s.Store.AllMeta(ctx)
+	}
 	if err != nil {
 		log.Printf("scanner: %v", err)
-		return nil
+		return false
 	}
 	var queue []model.Record
 	s.mu.Lock()
-	if s.inflight == nil {
-		s.inflight = map[string]bool{}
-	}
 	for _, r := range recs {
 		if Eligible(r, meta[r.ID]) {
 			queue = append(queue, r)
-			s.inflight[r.ID] = true
+			s.inflight[r.ID]++
 		}
 	}
 	s.mu.Unlock()
 	if len(queue) == 0 {
-		return nil
+		return false
 	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		ports, dnsOK := s.Ports(ctx), s.dnsWorks(ctx)
-		sem := make(chan struct{}, concurrency)
-		var wg sync.WaitGroup
+		s.scanEach(ctx, queue, s.Ports(ctx), s.dnsWorks(ctx))
+		s.mu.Lock()
 		for _, r := range queue {
-			wg.Add(1)
-			sem <- struct{}{}
-			go func(r model.Record) {
-				defer wg.Done()
-				defer func() { <-sem }()
-				s.scanAndStore(ctx, r, ports, dnsOK)
-				s.mu.Lock()
+			if s.inflight[r.ID]--; s.inflight[r.ID] <= 0 {
 				delete(s.inflight, r.ID)
-				s.mu.Unlock()
-			}(r)
+			}
 		}
-		wg.Wait()
+		s.mu.Unlock()
 	}()
-	ids := make([]string, len(queue))
-	for i, r := range queue {
-		ids[i] = r.ID
-	}
-	return ids
+	return true
 }
 
 func (s *Scanner) scanAndStore(ctx context.Context, r model.Record, ports []int, dnsOK bool) {

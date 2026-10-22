@@ -7,6 +7,8 @@ import { act } from '../lib/data';
 import { DNS_FIELD_LABEL, fieldValue } from '../lib/records';
 import type { SnapshotDiff, SnapshotInfo, SnapRecord } from '../types';
 
+const field = (r: object, f: string) => (r as Record<string, unknown>)[f];
+
 export function Snapshots() {
   const q = useQuery({ queryKey: ['snapshots'], queryFn: () => api<{ snapshots: SnapshotInfo[]; keep: number }>('GET', '/api/snapshots') });
   const [diff, setDiff] = useState<SnapshotDiff | null>(null);
@@ -27,8 +29,11 @@ export function Snapshots() {
   const restore = async (title: string, body: Record<string, unknown>, describe: string, danger = false) => {
     const ok = await confirmDialog({ title, body: <p className="pre">{describe}</p>, confirmText: title, danger });
     if (!ok) return;
-    await act(() => api('POST', '/api/records/restore', body), '已還原');
-    if (diff) compare(diff.name);
+    // Refresh the comparison alongside the record refresh act() starts.
+    await act(async () => {
+      await api('POST', '/api/records/restore', body);
+      if (diff) compare(diff.name);
+    }, '已還原');
   };
   const input = (r: SnapRecord) => ({ type: r.type, name: r.name, content: r.content, ttl: r.ttl, proxied: r.proxied, priority: r.priority, comment: r.comment });
 
@@ -116,7 +121,7 @@ export function Snapshots() {
               <span className="small">
                 {c.fields.map((f) => (
                   <span key={f} className="diff-field">
-                    {DNS_FIELD_LABEL[f] ?? f}：<del className="old">{fieldValue(f, (c.then as unknown as Record<string, unknown>)[f])}</del> → {fieldValue(f, (c.now as unknown as Record<string, unknown>)[f])}
+                    {DNS_FIELD_LABEL[f] ?? f}：<del className="old">{fieldValue(f, field(c.then, f))}</del> → {fieldValue(f, field(c.now, f))}
                   </span>
                 ))}
               </span>
@@ -128,7 +133,7 @@ export function Snapshots() {
                   restore(
                     '改回',
                     { mode: 'revert', record_id: c.now.id, data: input(c.then) },
-                    `將 ${c.now.name} 改回快照時的設定：\n${c.fields.map((f) => `${DNS_FIELD_LABEL[f] ?? f}：${fieldValue(f, (c.now as unknown as Record<string, unknown>)[f])} → ${fieldValue(f, (c.then as unknown as Record<string, unknown>)[f])}`).join('\n')}`,
+                    `將 ${c.now.name} 改回快照時的設定：\n${c.fields.map((f) => `${DNS_FIELD_LABEL[f] ?? f}：${fieldValue(f, field(c.now, f))} → ${fieldValue(f, field(c.then, f))}`).join('\n')}`,
                   )
                 }
               >

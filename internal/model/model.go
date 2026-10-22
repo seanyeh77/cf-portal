@@ -148,7 +148,8 @@ type AuditEntry struct {
 	Detail string  `json:"detail"`
 }
 
-func priority(p *int) int {
+// Priority dereferences a record priority; -1 means none.
+func Priority(p *int) int {
 	if p == nil {
 		return -1
 	}
@@ -174,7 +175,7 @@ func ChangedFields(a, b RecordInput) []string {
 	if a.Proxied != b.Proxied {
 		f = append(f, "proxied")
 	}
-	if priority(a.Priority) != priority(b.Priority) {
+	if Priority(a.Priority) != Priority(b.Priority) {
 		f = append(f, "priority")
 	}
 	if a.Comment != b.Comment {

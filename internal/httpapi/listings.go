@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -218,6 +219,10 @@ func (s *Server) apiRefreshIcon(w http.ResponseWriter, r *http.Request) {
 func readUpload(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, error) {
 	r.Body = http.MaxBytesReader(w, r.Body, limit+64<<10)
 	f, _, err := r.FormFile("file")
+	var tooBig *http.MaxBytesError
+	if errors.As(err, &tooBig) {
+		return nil, err
+	}
 	if err != nil {
 		return nil, invalidf("請選擇檔案（上限 " + humanSize(limit) + "）")
 	}

@@ -65,13 +65,17 @@ func (s *Store) count(name string) int {
 	if err != nil {
 		return 0
 	}
+	s.setCount(name, len(snap.Records))
+	return len(snap.Records)
+}
+
+func (s *Store) setCount(name string, n int) {
 	s.mu.Lock()
 	if s.counts == nil {
 		s.counts = map[string]int{}
 	}
-	s.counts[name] = len(snap.Records)
+	s.counts[name] = n
 	s.mu.Unlock()
-	return len(snap.Records)
 }
 
 func (s *Store) nameTime(name string) (time.Time, string, bool) {
@@ -137,12 +141,7 @@ func (s *Store) Create(zone, source string, recs []Record, at time.Time) (Info, 
 	if err := os.Rename(tmp, filepath.Join(s.Dir, name)); err != nil {
 		return Info{}, err
 	}
-	s.mu.Lock()
-	if s.counts == nil {
-		s.counts = map[string]int{}
-	}
-	s.counts[name] = len(recs)
-	s.mu.Unlock()
+	s.setCount(name, len(recs))
 	return Info{Name: name, TS: snap.TS, Source: source, Count: len(recs), Size: int64(len(b))}, nil
 }
 
@@ -205,6 +204,9 @@ func (s *Store) Prune(keep int) error {
 		n++
 		if n > keep {
 			os.Remove(filepath.Join(s.Dir, i.Name))
+			s.mu.Lock()
+			delete(s.counts, i.Name)
+			s.mu.Unlock()
 		}
 	}
 	return nil
@@ -320,11 +322,7 @@ func BIND(zone string, recs []Record, ts time.Time) string {
 		case "CNAME", "NS", "PTR", "DNAME":
 			content = dot(content)
 		case "MX":
-			prio := 0
-			if r.Priority != nil {
-				prio = *r.Priority
-			}
-			content = fmt.Sprintf("%d %s", prio, dot(content))
+			content = fmt.Sprintf("%d %s", max(model.Priority(r.Priority), 0), dot(content))
 		case "SRV":
 			f := strings.Fields(content)
 			if len(f) == 3 {

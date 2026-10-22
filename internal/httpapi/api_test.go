@@ -501,3 +501,32 @@ func TestMuteAndScan(t *testing.T) {
 		t.Fatalf("scan %+v", st)
 	}
 }
+
+func TestFailedUpdateWritesNothing(t *testing.T) {
+	e := newEnv(t)
+	e.login()
+	g := e.mock.Find("A", "gitlab")
+	audits := len(e.audits())
+	// Renaming gitlab onto the docs CNAME conflicts; the meta must not be saved.
+	w := e.do("PATCH", "/api/records/"+g.ID, map[string]any{"name": "docs", "meta": map[string]any{"owner": "不該寫入"}})
+	if w.Code != 409 {
+		t.Fatalf("conflict: %d %s", w.Code, w.Body.String())
+	}
+	if m, _ := e.srv.Store.Meta(context.Background(), g.ID); m.Owner != "" {
+		t.Fatalf("meta written despite failed update: %+v", m)
+	}
+	if n := len(e.audits()); n != audits {
+		t.Fatalf("audit written despite failed update: %d", n)
+	}
+}
+
+func TestOversizedUpload(t *testing.T) {
+	e := newEnv(t)
+	e.login()
+	g := e.mock.Find("A", "gitlab")
+	e.mustOK(e.do("PUT", "/api/listings/"+g.ID, map[string]any{"title": "GitLab", "icon": "none"}))
+	big := append(append([]byte{}, mockcf.PNG1...), make([]byte, 2<<20)...)
+	if w := e.upload("/api/listings/"+g.ID+"/icon", "x.png", big); w.Code != 413 || !strings.Contains(w.Body.String(), "1 MB") {
+		t.Fatalf("oversized upload: %d %s", w.Code, w.Body.String())
+	}
+}
