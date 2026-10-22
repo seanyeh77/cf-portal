@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, errMsg } from '../../shared/api';
 import { addMonth, semesterEnd } from '../../shared/format';
-import { Dialog, Tip, toast } from '../../shared/ui';
-import { refreshRecords, useRecords } from '../lib/data';
+import { Dialog, DialogActions, Tip, toast } from '../../shared/ui';
+import { act, refreshRecords, useRecords } from '../lib/data';
 import { ownersOf, sub } from '../lib/records';
 import { closeModal, drawerStore, modalStore, selectionStore, useStore } from '../lib/store';
 import type { DNSRecord, RecordsData } from '../types';
@@ -59,17 +59,11 @@ function DeleteDialog({ r, zone }: { r: DNSRecord; zone: string }) {
   const [busy, setBusy] = useState(false);
   const del = async () => {
     setBusy(true);
-    try {
-      await api('DELETE', `/api/records/${r.id}`);
-      toast('已刪除，可於操作紀錄還原');
+    if (await act(() => api('DELETE', `/api/records/${r.id}`), '已刪除，可於操作紀錄還原')) {
       closeModal();
       if (drawerStore.get() === r.id) drawerStore.set(null);
-      refreshRecords();
-    } catch (e) {
-      toast(errMsg(e), { error: true });
-    } finally {
-      setBusy(false);
     }
+    setBusy(false);
   };
   return (
     <Dialog
@@ -77,16 +71,7 @@ function DeleteDialog({ r, zone }: { r: DNSRecord; zone: string }) {
       onClose={closeModal}
       width={500}
       testId="delete-dialog"
-      footer={
-        <>
-          <button type="button" className="btn" data-autofocus onClick={closeModal}>
-            取消
-          </button>
-          <button type="button" className="btn danger" disabled={busy} onClick={del}>
-            刪除
-          </button>
-        </>
-      }
+      footer={<DialogActions onCancel={closeModal} confirm="刪除" danger disabled={busy} onConfirm={del} cancelFirst />}
     >
       <p>將自 Cloudflare 刪除：</p>
       <p className="mono delete-target">
@@ -127,17 +112,11 @@ function BulkMetaDialog({ ids, focusOwner, data }: { ids: string[]; focusOwner?:
       return;
     }
     setBusy(true);
-    try {
-      await api('POST', '/api/records/bulk-meta', { ids, set: body });
-      toast(`已更新 ${ids.length} 筆`);
+    if (await act(() => api('POST', '/api/records/bulk-meta', { ids, set: body }), `已更新 ${ids.length} 筆`)) {
       selectionStore.set(new Set());
       closeModal();
-      refreshRecords();
-    } catch (e) {
-      toast(errMsg(e), { error: true });
-    } finally {
-      setBusy(false);
     }
+    setBusy(false);
   };
   const row = (k: BulkField, label: string, input: React.ReactNode) => (
     <div className="bulk-row" key={k}>
@@ -154,16 +133,7 @@ function BulkMetaDialog({ ids, focusOwner, data }: { ids: string[]; focusOwner?:
       onClose={closeModal}
       width={560}
       testId="bulk-meta"
-      footer={
-        <>
-          <button type="button" className="btn" onClick={closeModal}>
-            取消
-          </button>
-          <button type="button" className="btn primary" disabled={busy} onClick={save}>
-            儲存
-          </button>
-        </>
-      }
+      footer={<DialogActions onCancel={closeModal} confirm="儲存" disabled={busy} onConfirm={save} />}
     >
       <p className="small muted">僅修改勾選的欄位。</p>
       {row(
@@ -223,7 +193,8 @@ function BulkMetaDialog({ ids, focusOwner, data }: { ids: string[]; focusOwner?:
 }
 
 function BulkDeleteDialog({ ids, data }: { ids: string[]; data: RecordsData }) {
-  const recs = ids.map((id) => data.records.find((r) => r.id === id)).filter(Boolean) as DNSRecord[];
+  const byID = new Map(data.records.map((r) => [r.id, r]));
+  const recs = ids.map((id) => byID.get(id)).filter((r): r is DNSRecord => !!r);
   const [sure, setSure] = useState(false);
   const [busy, setBusy] = useState(false);
   const del = async () => {
@@ -248,16 +219,7 @@ function BulkDeleteDialog({ ids, data }: { ids: string[]; data: RecordsData }) {
       onClose={closeModal}
       width={560}
       testId="bulk-delete"
-      footer={
-        <>
-          <button type="button" className="btn" data-autofocus onClick={closeModal}>
-            取消
-          </button>
-          <button type="button" className="btn danger" disabled={!sure || busy} onClick={del}>
-            刪除
-          </button>
-        </>
-      }
+      footer={<DialogActions onCancel={closeModal} confirm="刪除" danger disabled={!sure || busy} onConfirm={del} cancelFirst />}
     >
       <ul className="bulk-list mono small">
         {recs.map((r) => (

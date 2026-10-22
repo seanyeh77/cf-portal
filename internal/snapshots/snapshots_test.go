@@ -10,17 +10,15 @@ import (
 	"github.com/nycu-sdc/sdc-portal/internal/model"
 )
 
-func p(i int) *int { return &i }
-
 func TestBIND(t *testing.T) {
 	recs := []Record{
 		{RecordInput: model.RecordInput{Type: "A", Name: "grafana.sdc.nycu.club", Content: "10.0.1.20", TTL: 1}},
 		{RecordInput: model.RecordInput{Type: "TXT", Name: "_dmarc.sdc.nycu.club", Content: `v=DMARC1; p="none"`, TTL: 3600}},
 		{RecordInput: model.RecordInput{Type: "TXT", Name: "q.sdc.nycu.club", Content: `"already quoted"`, TTL: 1}},
 		{RecordInput: model.RecordInput{Type: "CNAME", Name: "docs.sdc.nycu.club", Content: "sdc-docs.pages.dev", TTL: 1, Proxied: true}},
-		{RecordInput: model.RecordInput{Type: "MX", Name: "sdc.nycu.club", Content: "mail.example.com", TTL: 1, Priority: p(10)}},
+		{RecordInput: model.RecordInput{Type: "MX", Name: "sdc.nycu.club", Content: "mail.example.com", TTL: 1, Priority: new(10)}},
 		{RecordInput: model.RecordInput{Type: "NS", Name: "sub.sdc.nycu.club", Content: "ns1.example.com.", TTL: 86400}},
-		{RecordInput: model.RecordInput{Type: "SRV", Name: "_mc._tcp.sdc.nycu.club", Content: "0 25565 mc.sdc.nycu.club", TTL: 1, Priority: p(10)}},
+		{RecordInput: model.RecordInput{Type: "SRV", Name: "_mc._tcp.sdc.nycu.club", Content: "0 25565 mc.sdc.nycu.club", TTL: 1, Priority: new(10)}},
 	}
 	out := BIND("sdc.nycu.club", recs, time.Unix(0, 0))
 	for _, want := range []string{

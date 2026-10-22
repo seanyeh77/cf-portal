@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"maps"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -88,8 +89,7 @@ func cleanListing(b listingBody) (listingBody, error) {
 func (s *Server) apiPutListing(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var b listingBody
-	if err := decode(w, r, &b); err != nil {
-		writeAnyErr(w, err)
+	if !decode(w, r, &b) {
 		return
 	}
 	b, err := cleanListing(b)
@@ -154,14 +154,20 @@ func (s *Server) apiPutListing(w http.ResponseWriter, r *http.Request) {
 	if oldFile != nil && (l.IconFile == nil || *l.IconFile != *oldFile) {
 		s.removeIconFile(ctx, oldFile)
 	}
-	action := "listing_save"
-	s.auditLog(r, action, rec.Name, map[string]any{"record_id": id, "title": l.Title, "category": l.Category, "icon": l.Icon, "new": prev == nil})
+	s.auditLog(r, "listing_save", rec.Name, map[string]any{"record_id": id, "title": l.Title, "category": l.Category, "icon": l.Icon, "new": prev == nil})
 	if fetchAuto {
 		go s.fetchAutoIcon(l)
 	}
 	s.Health.CheckSoon(l)
-	saved, _ := s.Store.Listing(ctx, id)
-	writeJSON(w, http.StatusOK, map[string]any{"listing": toListingOut(saved), "icon_error": iconErr})
+	s.writeListing(w, r, id, map[string]any{"icon_error": iconErr})
+}
+
+// writeListing answers with the listing as stored now, plus extra fields.
+func (s *Server) writeListing(w http.ResponseWriter, r *http.Request, id string, extra map[string]any) {
+	saved, _ := s.Store.Listing(r.Context(), id)
+	out := map[string]any{"listing": toListingOut(saved)}
+	maps.Copy(out, extra)
+	writeJSON(w, http.StatusOK, out)
 }
 
 // fetchAutoIcon fetches an automatic icon and stores it if the listing
@@ -211,8 +217,7 @@ func (s *Server) apiRefreshIcon(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, "找不到可用的圖示："+err.Error())
 		return
 	}
-	saved, _ := s.Store.Listing(r.Context(), l.RecordID)
-	writeJSON(w, http.StatusOK, map[string]any{"listing": toListingOut(saved)})
+	s.writeListing(w, r, l.RecordID, nil)
 }
 
 // fileTooLarge reports an upload over its limit (HTTP 413).
@@ -272,8 +277,7 @@ func (s *Server) apiUploadIcon(w http.ResponseWriter, r *http.Request) {
 	}
 	s.removeIconFile(ctx, old)
 	s.auditLog(r, "icon_upload", l.Hostname, map[string]any{"record_id": l.RecordID, "file": name})
-	saved, _ := s.Store.Listing(ctx, l.RecordID)
-	writeJSON(w, http.StatusOK, map[string]any{"listing": toListingOut(saved)})
+	s.writeListing(w, r, l.RecordID, nil)
 }
 
 func (s *Server) apiDeleteListing(w http.ResponseWriter, r *http.Request) {

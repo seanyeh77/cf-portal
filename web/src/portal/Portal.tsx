@@ -1,9 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { api } from '../shared/api';
 import { fmtHM, pct } from '../shared/format';
 import { getTheme, nextTheme, setTheme, themeLabel, type ThemeChoice } from '../shared/theme';
 import { copyText, Dialog } from '../shared/ui';
-import { fuzzy, neighbour } from './fuzzy';
+import { CommandBar } from './CommandBar';
+import { neighbour } from './fuzzy';
 
 export type Site = {
   title: string;
@@ -18,7 +20,7 @@ export type Site = {
   check_interval: number;
 };
 
-type Service = {
+export type Service = {
   id: string;
   title: string;
   description: string;
@@ -86,30 +88,13 @@ function StatusBar({ sum }: { sum?: Summary }) {
   );
 }
 
-function Highlight({ text, idx }: { text: string; idx: number[] }) {
-  const set = new Set(idx);
-  return (
-    <>
-      {[...text].map((ch, i) =>
-        set.has(i) ? (
-          <mark key={i} className="hit">
-            {ch}
-          </mark>
-        ) : (
-          <Fragment key={i}>{ch}</Fragment>
-        ),
-      )}
-    </>
-  );
-}
-
-function Card({
+const Card = memo(function Card({
   s,
   color,
   sum,
   featured,
   selected,
-  now,
+  isNew,
   index,
 }: {
   s: Service;
@@ -117,10 +102,9 @@ function Card({
   sum?: Summary;
   featured?: boolean;
   selected: boolean;
-  now: number;
+  isNew: boolean;
   index: number;
 }) {
-  const isNew = s.created_at && now - s.created_at < 7 * 86400;
   const last = sum?.last;
   const state = !last ? '尚未檢查' : last.ok ? '正常' : '無回應';
   const stCls = !last ? 'none' : last.ok ? 'ok' : 'down';
@@ -170,157 +154,7 @@ function Card({
       </div>
     </a>
   );
-}
-
-type Candidate = { label: string; idx: number[]; run: () => void; hint?: string };
-
-function CommandBar({
-  services,
-  categories,
-  onClose,
-  open,
-  setCategory,
-  setQuery,
-  applyTheme,
-  showHelp,
-}: {
-  services: Service[];
-  categories: string[];
-  onClose: () => void;
-  open: (s: Service) => void;
-  setCategory: (c: string) => void;
-  setQuery: (q: string) => void;
-  applyTheme: (t: ThemeChoice) => void;
-  showHelp: () => void;
-}) {
-  const [text, setText] = useState('');
-  const [sel, setSel] = useState(0);
-  const [err, setErr] = useState('');
-  const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => ref.current?.focus(), []);
-
-  const cands = useMemo((): Candidate[] => {
-    const raw = text.trimStart();
-    const [cmd, ...restParts] = raw.split(/\s+/);
-    const rest = restParts.join(' ');
-    const svc = (q: string) =>
-      services
-        .map((s) => ({ s, m: fuzzy(s.title, q) ?? fuzzy(s.hostname, q) }))
-        .filter((x) => x.m)
-        .sort((a, b) => b.m!.score - a.m!.score)
-        .slice(0, 8)
-        .map(({ s }) => ({ label: s.title, idx: fuzzy(s.title, q)?.idx ?? [], hint: s.hostname, run: () => open(s) }) as Candidate);
-    if (cmd === 'open' || cmd === 'o') return svc(rest);
-    if (cmd === 'cat') {
-      return ['全部', ...categories]
-        .map((c) => ({ c, m: fuzzy(c, rest) }))
-        .filter((x) => x.m)
-        .map(({ c, m }) => ({ label: `cat ${c}`, idx: m!.idx.map((i) => i + 4), run: () => setCategory(c === '全部' ? '' : c) }));
-    }
-    if (cmd === 'set') {
-      return (['dark', 'light', 'auto'] as const)
-        .filter((t) => `bg=${t}`.startsWith(rest) || rest === '')
-        .map((t) => ({ label: `set bg=${t}`, idx: [], run: () => applyTheme(t) }));
-    }
-    const commands: Candidate[] = [
-      { label: 'open', idx: [], hint: '開啟服務', run: () => setText('open ') },
-      { label: 'cat', idx: [], hint: '切換分類', run: () => setText('cat ') },
-      { label: 'set bg=dark', idx: [], hint: '主題', run: () => applyTheme('dark') },
-      { label: 'set bg=light', idx: [], hint: '主題', run: () => applyTheme('light') },
-      { label: 'set bg=auto', idx: [], hint: '主題', run: () => applyTheme('auto') },
-      { label: 'noh', idx: [], hint: '清除搜尋', run: () => setQuery('') },
-      { label: 'help', idx: [], hint: '快捷鍵說明', run: showHelp },
-      { label: 'q', idx: [], hint: '關閉', run: () => undefined },
-    ];
-    if (!raw) return commands;
-    const cm = commands
-      .map((c) => ({ c, m: c.label.startsWith(raw) ? { idx: [...raw].map((_, i) => i) } : null }))
-      .filter((x) => x.m)
-      .map(({ c, m }) => ({ ...c, idx: m!.idx }));
-    return [...cm, ...svc(raw)];
-  }, [text, services, categories, open, setCategory, setQuery, applyTheme, showHelp]);
-
-  useEffect(() => setSel(0), [text]);
-
-  const exec = () => {
-    const raw = text.trim();
-    if (raw === 'q' || raw === 'quit') return onClose();
-    const c = cands[sel];
-    if (!c) {
-      setErr(raw ? `E492: Not an editor command: ${raw}` : '');
-      return;
-    }
-    const keepOpen = c.label === 'open' || c.label === 'cat';
-    c.run();
-    if (!keepOpen) onClose();
-  };
-
-  return (
-    <div className="cmd-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="cmd" role="dialog" aria-label="命令列">
-        <div className="cmd-input">
-          <span className="colon">:</span>
-          <input
-            ref={ref}
-            value={text}
-            aria-label="命令"
-            spellCheck={false}
-            autoComplete="off"
-            onChange={(e) => {
-              setText(e.target.value);
-              setErr('');
-            }}
-            onKeyDown={(e) => {
-              e.stopPropagation();
-              const move = (d: number) => {
-                e.preventDefault();
-                setSel((s) => (cands.length ? (s + d + cands.length) % cands.length : 0));
-              };
-              if (e.key === 'Escape') {
-                e.preventDefault();
-                onClose();
-              } else if (e.key === 'Enter') {
-                e.preventDefault();
-                exec();
-              } else if (e.key === 'Tab') move(e.shiftKey ? -1 : 1);
-              else if (e.key === 'ArrowDown' || (e.ctrlKey && e.key === 'n')) move(1);
-              else if (e.key === 'ArrowUp' || (e.ctrlKey && e.key === 'p')) move(-1);
-              else if (e.key === 'Backspace' && text === '') onClose();
-            }}
-          />
-        </div>
-        {err && <div className="cmd-err">{err}</div>}
-        <ul className="cmd-list" role="listbox">
-          {cands.map((c, i) => (
-            <li
-              key={c.label + i}
-              role="option"
-              aria-selected={i === sel}
-              className={i === sel ? 'sel' : undefined}
-              onMouseEnter={() => setSel(i)}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                setSel(i);
-                const keepOpen = c.label === 'open' || c.label === 'cat';
-                c.run();
-                if (!keepOpen) onClose();
-              }}
-            >
-              <span>
-                <Highlight text={c.label} idx={c.idx} />
-              </span>
-              {c.hint && <span className="cmd-hint">{c.hint}</span>}
-            </li>
-          ))}
-          {cands.length === 0 && <li className="empty">無符合項目</li>}
-        </ul>
-        <div className="cmd-foot">
-          <kbd>Tab</kbd> <kbd>C-n</kbd> <kbd>C-p</kbd> 選擇　<kbd>Enter</kbd> 執行　<kbd>Esc</kbd> 關閉
-        </div>
-      </div>
-    </div>
-  );
-}
+});
 
 const HELP: [string, string][] = [
   ['j k h l、方向鍵', '在卡片間移動'],
@@ -342,11 +176,7 @@ export function Portal({ init }: { init: PortalInit }) {
   const interval = Math.max(15, site.check_interval || 60);
   const statusQ = useQuery({
     queryKey: ['status'],
-    queryFn: async () => {
-      const r = await fetch('/status.json', { headers: { Accept: 'application/json' } });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return (await r.json()) as { status: Record<string, Summary>; now: number };
-    },
+    queryFn: () => api<{ status: Record<string, Summary>; now: number }>('GET', '/status.json'),
     initialData: { status: data.status, now: data.now },
     initialDataUpdatedAt: Date.now(),
     refetchInterval: interval * 1000,
@@ -391,7 +221,8 @@ export function Portal({ init }: { init: PortalInit }) {
       return [s.title, s.description, s.hostname, s.category, s.tags.join(' ')].join('\n').toLowerCase().includes(q);
     });
   }, [sorted, query, category]);
-  const featured = filtering ? [] : visible.filter((s) => s.featured);
+  const featured = useMemo(() => (filtering ? [] : visible.filter((s) => s.featured)), [filtering, visible]);
+  const isNew = (s: Service) => !!s.created_at && now - s.created_at < 7 * 86400;
   const sections = useMemo(() => {
     const rest = filtering ? visible : visible.filter((s) => !s.featured);
     return categories.map((c) => ({ name: c, items: rest.filter((s) => catOf(s) === c) })).filter((x) => x.items.length);
@@ -430,9 +261,13 @@ export function Portal({ init }: { init: PortalInit }) {
   );
 
   // nvim-style keys. Inputs stop propagation, so typing never reaches here.
+  // The listener is registered once and reads the current state from a ref.
   const pendingKey = useRef<{ k: string; t: number } | null>(null);
+  const keyState = useRef({ cmdOpen, helpOpen, selected, flat, select, copy, openService, cycleCategory });
+  keyState.current = { cmdOpen, helpOpen, selected, flat, select, copy, openService, cycleCategory };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const { cmdOpen, helpOpen, selected, flat, select, copy, openService, cycleCategory } = keyState.current;
       if (cmdOpen || helpOpen || e.defaultPrevented) return;
       const t = e.target as HTMLElement;
       if (t.closest('input,textarea,select,[contenteditable=true],dialog')) return;
@@ -533,7 +368,7 @@ export function Portal({ init }: { init: PortalInit }) {
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [cmdOpen, helpOpen, selected, flat, select, copy, openService, cycleCategory]);
+  }, []);
 
   const heroStyle = site.hero ? ({ '--hero': `url(${site.hero})` } as CSSProperties) : undefined;
   const announce = site.announce_text.trim();
@@ -674,7 +509,7 @@ export function Portal({ init }: { init: PortalInit }) {
             <div className="grid featured-grid">
               {featured.map((s) => {
                 const i = cardIndex++;
-                return <Card key={s.id} s={s} color={colorOf(catOf(s))} sum={status[s.id]} featured selected={i === selected} now={now} index={i} />;
+                return <Card key={s.id} s={s} color={colorOf(catOf(s))} sum={status[s.id]} featured selected={i === selected} isNew={isNew(s)} index={i} />;
               })}
             </div>
           </section>
@@ -688,7 +523,7 @@ export function Portal({ init }: { init: PortalInit }) {
             <div className="grid">
               {sec.items.map((s) => {
                 const i = cardIndex++;
-                return <Card key={s.id} s={s} color={colorOf(sec.name)} sum={status[s.id]} selected={i === selected} now={now} index={i} />;
+                return <Card key={s.id} s={s} color={colorOf(sec.name)} sum={status[s.id]} selected={i === selected} isNew={isNew(s)} index={i} />;
               })}
             </div>
           </section>

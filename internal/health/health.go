@@ -5,11 +5,14 @@ import (
 	"context"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nycu-sdc/sdc-portal/internal/httpclient"
+	"github.com/nycu-sdc/sdc-portal/internal/loop"
 	"github.com/nycu-sdc/sdc-portal/internal/model"
 	"github.com/nycu-sdc/sdc-portal/internal/store"
 )
@@ -21,11 +24,19 @@ const (
 	concurrency = 10
 )
 
-// Checker runs HTTP checks against listings.
+// Checker runs HTTP checks against listings and keeps their summaries.
 type Checker struct {
 	Store    *store.Store
 	Interval time.Duration
 	client   *http.Client
+	// cache holds the summaries computed after the latest checks; public
+	// pages read it instead of scanning a day of check rows per request.
+	cache atomic.Pointer[summaries]
+}
+
+type summaries struct {
+	at   time.Time
+	byID map[string]Summary
 }
 
 // New returns a checker.
@@ -33,10 +44,10 @@ func New(st *store.Store, interval, timeout time.Duration, verifyTLS bool) *Chec
 	return &Checker{Store: st, Interval: interval, client: httpclient.New(timeout, verifyTLS, httpclient.LimitRedirects)}
 }
 
-// Check performs one check and stores the result.
+// Check performs one check of a listing.
 func (c *Checker) Check(ctx context.Context, l model.Listing) store.Check {
 	start := time.Now()
-	res := store.Check{TS: float64(start.UnixNano()) / 1e9}
+	res := store.Check{RecordID: l.RecordID, TS: float64(start.UnixNano()) / 1e9}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, l.EffectiveURL(), nil)
 	if err == nil {
 		req.Header.Set("User-Agent", "sdc-portal/1.0 (+status check)")
@@ -50,10 +61,17 @@ func (c *Checker) Check(ctx context.Context, l model.Listing) store.Check {
 		}
 	}
 	res.MS = int(time.Since(start).Milliseconds())
-	if err := c.Store.AddCheck(ctx, l.RecordID, res); err != nil {
-		log.Printf("health: store check: %v", err)
-	}
 	return res
+}
+
+// record stores results in one transaction and refreshes the summaries.
+func (c *Checker) record(ctx context.Context, checks []store.Check) {
+	if err := c.Store.AddChecks(ctx, checks, float64(time.Now().Add(-retention).Unix())); err != nil {
+		log.Printf("health: store checks: %v", err)
+	}
+	if err := c.refresh(ctx, time.Now()); err != nil {
+		log.Printf("health: summarize: %v", err)
+	}
 }
 
 // RunOnce checks all listings.
@@ -63,19 +81,18 @@ func (c *Checker) RunOnce(ctx context.Context) {
 		log.Printf("health: %v", err)
 		return
 	}
+	results := make([]store.Check, len(ls))
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
-	for _, l := range ls {
-		wg.Add(1)
+	for i, l := range ls {
 		sem <- struct{}{}
-		go func(l model.Listing) {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() { <-sem }()
-			c.Check(ctx, l)
-		}(l)
+			results[i] = c.Check(ctx, l)
+		})
 	}
 	wg.Wait()
-	c.Store.PruneChecks(ctx, float64(time.Now().Add(-retention).Unix()))
+	c.record(ctx, results)
 }
 
 // CheckSoon checks one listing in the background.
@@ -83,24 +100,12 @@ func (c *Checker) CheckSoon(l model.Listing) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
-		c.Check(ctx, l)
+		c.record(ctx, []store.Check{c.Check(ctx, l)})
 	}()
 }
 
-// Run loops until ctx is done.
-func (c *Checker) Run(ctx context.Context) {
-	c.RunOnce(ctx)
-	t := time.NewTicker(c.Interval)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			c.RunOnce(ctx)
-		}
-	}
-}
+// Run checks on the configured interval until ctx is done.
+func (c *Checker) Run(ctx context.Context) { loop.Every(ctx, c.Interval, c.RunOnce) }
 
 // Summary is the status of one service.
 type Summary struct {
@@ -119,8 +124,8 @@ type LastCheck struct {
 	Status int     `json:"status"`
 }
 
-// Summaries summarizes checks for the given listings (all listings if nil).
-func (c *Checker) Summaries(ctx context.Context, now time.Time, ls []model.Listing) (map[string]Summary, error) {
+// refresh recomputes the summaries of all listings from the stored checks.
+func (c *Checker) refresh(ctx context.Context, now time.Time) error {
 	start := now.Truncate(bucketSize).Add(-(bucketCount - 1) * bucketSize)
 	from := now.Add(-24 * time.Hour)
 	if start.Before(from) {
@@ -128,16 +133,37 @@ func (c *Checker) Summaries(ctx context.Context, now time.Time, ls []model.Listi
 	}
 	all, err := c.Store.ChecksSince(ctx, float64(from.Unix()))
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if ls == nil {
-		if ls, err = c.Store.Listings(ctx); err != nil {
+	ls, err := c.Store.Listings(ctx)
+	if err != nil {
+		return err
+	}
+	byID := make(map[string]Summary, len(ls))
+	for _, l := range ls {
+		byID[l.RecordID] = Summarize(all[l.RecordID], now)
+	}
+	c.cache.Store(&summaries{at: now, byID: byID})
+	return nil
+}
+
+// Summaries returns the cached summaries of the given listings (all if
+// nil). The cache is rebuilt after every check run, and when the
+// 30-minute buckets have moved on since.
+func (c *Checker) Summaries(ctx context.Context, now time.Time, ls []model.Listing) (map[string]Summary, error) {
+	cur := c.cache.Load()
+	if cur == nil || !now.Truncate(bucketSize).Equal(cur.at.Truncate(bucketSize)) {
+		if err := c.refresh(ctx, now); err != nil {
 			return nil, err
 		}
+		cur = c.cache.Load()
 	}
-	out := map[string]Summary{}
+	if ls == nil {
+		return cur.byID, nil
+	}
+	out := make(map[string]Summary, len(ls))
 	for _, l := range ls {
-		out[l.RecordID] = Summarize(all[l.RecordID], now)
+		out[l.RecordID] = cur.byID[l.RecordID]
 	}
 	return out, nil
 }
@@ -166,12 +192,12 @@ func Summarize(checks []store.Check, now time.Time) Summary {
 	}
 	for i := range s.Buckets {
 		if total[i] > 0 {
-			v := float64(okN[i]) / float64(total[i])
+			v := ratio(okN[i], total[i])
 			s.Buckets[i] = &v
 		}
 	}
 	if upTotal > 0 {
-		v := float64(upOK) / float64(upTotal)
+		v := ratio(upOK, upTotal)
 		s.Uptime24 = &v
 	}
 	if n := len(checks); n > 0 {
@@ -179,4 +205,10 @@ func Summarize(checks []store.Check, now time.Time) Summary {
 		s.Last = &LastCheck{TS: l.TS, OK: l.OK, MS: l.MS, Status: l.Status}
 	}
 	return s
+}
+
+// ratio is ok/total rounded to 3 decimals, enough for the status bars and
+// much shorter in JSON.
+func ratio(ok, total int) float64 {
+	return math.Round(float64(ok)/float64(total)*1000) / 1000
 }

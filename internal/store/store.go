@@ -6,8 +6,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +25,8 @@ var ErrNotFound = errors.New("not found")
 type Store struct {
 	db  *sql.DB
 	Dir string
+	// Defaults are the setting values used until a setting is saved.
+	Defaults map[string]string
 }
 
 const schema = `
@@ -158,25 +162,34 @@ func DefaultSettings(title string) map[string]string {
 	}
 }
 
-// Settings returns all settings merged over defaults.
-func (s *Store) Settings(ctx context.Context, defaults map[string]string) (map[string]string, error) {
-	out := map[string]string{}
-	for k, v := range defaults {
-		out[k] = v
+// Settings returns all settings merged over s.Defaults.
+func (s *Store) Settings(ctx context.Context) (map[string]string, error) {
+	out := maps.Clone(s.Defaults)
+	if out == nil {
+		out = DefaultSettings("SDC Services")
 	}
 	rows, err := s.db.QueryContext(ctx, "SELECT key, value FROM settings")
 	if err != nil {
-		return nil, err
+		return out, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var k, v string
 		if err := rows.Scan(&k, &v); err != nil {
-			return nil, err
+			return out, err
 		}
 		out[k] = v
 	}
 	return out, rows.Err()
+}
+
+// SettingInt returns an integer setting, falling back to its default.
+func SettingInt(set map[string]string, key string) int {
+	if n, err := strconv.Atoi(strings.TrimSpace(set[key])); err == nil {
+		return n
+	}
+	n, _ := strconv.Atoi(DefaultSettings("")[key])
+	return n
 }
 
 // SetSettings stores the given keys.
@@ -475,16 +488,30 @@ func (s *Store) IconFileInUse(ctx context.Context, file string) (bool, error) {
 
 // Check is one service status check.
 type Check struct {
-	TS     float64
-	OK     bool
-	MS     int
-	Status int
+	RecordID string
+	TS       float64
+	OK       bool
+	MS       int
+	Status   int
 }
 
-// AddCheck stores a check result.
-func (s *Store) AddCheck(ctx context.Context, id string, c Check) error {
-	_, err := s.db.ExecContext(ctx, "INSERT INTO checks(record_id, ts, ok, ms, status) VALUES(?,?,?,?,?)", id, c.TS, b2i(c.OK), c.MS, c.Status)
-	return err
+// AddChecks stores check results and deletes checks older than pruneBefore,
+// in one transaction.
+func (s *Store) AddChecks(ctx context.Context, checks []Check, pruneBefore float64) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, c := range checks {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO checks(record_id, ts, ok, ms, status) VALUES(?,?,?,?,?)", c.RecordID, c.TS, b2i(c.OK), c.MS, c.Status); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM checks WHERE ts<?", pruneBefore); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ChecksSince returns checks since ts, grouped by record id, oldest first.
@@ -506,12 +533,6 @@ func (s *Store) ChecksSince(ctx context.Context, ts float64) (map[string][]Check
 		out[id] = append(out[id], c)
 	}
 	return out, rows.Err()
-}
-
-// PruneChecks deletes checks older than ts.
-func (s *Store) PruneChecks(ctx context.Context, ts float64) error {
-	_, err := s.db.ExecContext(ctx, "DELETE FROM checks WHERE ts<?", ts)
-	return err
 }
 
 // ---- requests ----

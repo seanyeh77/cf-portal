@@ -1,12 +1,14 @@
 import { request as pwRequest } from '@playwright/test';
 import { expect, test, toast } from './fixtures';
+// @ts-expect-error plain JS helper shared with manual runs
+import { BASE } from './seed.mjs';
 
 test.describe.configure({ mode: 'serial' });
 
 const card = (page: import('@playwright/test').Page, host: string) => page.getByTestId(`card-${host}.sdc.nycu.club`);
 
 async function settings(body: Record<string, string>) {
-  const r = await pwRequest.newContext({ storageState: 'e2e/.auth.json', baseURL: 'http://127.0.0.1:18080' });
+  const r = await pwRequest.newContext({ storageState: 'e2e/.auth.json', baseURL: BASE });
   const res = await r.put('/api/settings', { data: body, headers: { 'X-Requested-With': 'cf-portal' } });
   expect(res.ok()).toBeTruthy();
   await r.dispose();

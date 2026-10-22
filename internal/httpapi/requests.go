@@ -186,7 +186,7 @@ func (s *Server) apiRequests(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
-			in := model.RecordInput{Type: q.Type, Name: q.Name, Content: q.Content, TTL: 1}
+			in := q.Input()
 			if err := dnsrec.Validate(&in, s.Cfg.CFZoneName); err != nil {
 				o.Conflict = err.Error()
 			} else if err := dnsrec.Conflict(in, recs, ""); err != nil {
@@ -229,11 +229,10 @@ func (s *Server) apiApprove(w http.ResponseWriter, r *http.Request) {
 		Meta   *model.Meta        `json:"meta"`
 		Note   string             `json:"note"`
 	}
-	if err := decode(w, r, &b); err != nil {
-		writeAnyErr(w, err)
+	if !decode(w, r, &b) {
 		return
 	}
-	in := model.RecordInput{Type: q.Type, Name: q.Name, Content: q.Content, TTL: 1}
+	in := q.Input()
 	if b.Record != nil {
 		in = *b.Record
 	}
@@ -262,8 +261,7 @@ func (s *Server) apiReject(w http.ResponseWriter, r *http.Request) {
 	var b struct {
 		Note string `json:"note"`
 	}
-	if err := decode(w, r, &b); err != nil {
-		writeAnyErr(w, err)
+	if !decode(w, r, &b) {
 		return
 	}
 	note := trimLen(b.Note, 500)

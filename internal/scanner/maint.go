@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/nycu-sdc/sdc-portal/internal/cloudflare"
+	"github.com/nycu-sdc/sdc-portal/internal/loop"
 	"github.com/nycu-sdc/sdc-portal/internal/model"
 	"github.com/nycu-sdc/sdc-portal/internal/snapshots"
 	"github.com/nycu-sdc/sdc-portal/internal/store"
@@ -56,6 +59,10 @@ func (m *Maint) AutoDelete(ctx context.Context, now time.Time) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	due := func(md model.Meta) bool { return md.AutoDelete && md.ExpiresAt != "" && md.ExpiresAt < today }
+	if !slices.ContainsFunc(slices.Collect(maps.Values(meta)), due) {
+		return 0, nil // nothing can expire: skip listing the zone
+	}
 	recs, _, err := m.CF.List(ctx, true)
 	if err != nil {
 		return 0, err
@@ -63,7 +70,7 @@ func (m *Maint) AutoDelete(ctx context.Context, now time.Time) (int, error) {
 	n := 0
 	for _, r := range recs {
 		md, ok := meta[r.ID]
-		if !ok || !md.AutoDelete || md.ExpiresAt == "" || md.ExpiresAt >= today {
+		if !ok || !due(md) {
 			continue
 		}
 		if err := m.CF.Delete(ctx, r.ID); err != nil {
@@ -97,17 +104,5 @@ func (m *Maint) RunOnce(ctx context.Context) {
 	}
 }
 
-// Run loops until ctx is done.
-func (m *Maint) Run(ctx context.Context) {
-	m.RunOnce(ctx)
-	t := time.NewTicker(m.Interval)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			m.RunOnce(ctx)
-		}
-	}
-}
+// Run repeats RunOnce on the configured interval until ctx is done.
+func (m *Maint) Run(ctx context.Context) { loop.Every(ctx, m.Interval, m.RunOnce) }

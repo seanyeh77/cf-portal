@@ -137,6 +137,11 @@ type Request struct {
 	RecordID  *string  `json:"record_id"`
 }
 
+// Input is the record a request asks for.
+func (q Request) Input() RecordInput {
+	return RecordInput{Type: q.Type, Name: q.Name, Content: q.Content, TTL: 1}
+}
+
 // AuditEntry is one row of the audit log.
 type AuditEntry struct {
 	ID     int64   `json:"id"`

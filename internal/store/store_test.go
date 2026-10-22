@@ -60,7 +60,8 @@ func TestMetaAndForget(t *testing.T) {
 	if len(m) != 0 || len(mu) != 0 {
 		t.Fatal("left over data")
 	}
-	set, _ := s.Settings(ctx, DefaultSettings("T"))
+	s.Defaults = DefaultSettings("T")
+	set, _ := s.Settings(ctx)
 	if set["title"] != "T" || set["zombie_days"] != "7" {
 		t.Fatal("defaults")
 	}

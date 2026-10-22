@@ -13,11 +13,8 @@ export const EXPIRY_KINDS = new Set(['expired', 'expiring']);
 /** Issues the status column leaves to other columns. */
 const HIDDEN_IN_STATUS = new Set(['no_owner', 'expired', 'expiring']);
 
-/** The first non-info issue level, or ''. */
-export function rowLevel(r: DNSRecord): Level | '' {
-  for (const i of r.issues) if (i.level !== 'info') return i.level;
-  return '';
-}
+/** The row level computed by the server. */
+export const rowLevel = (r: DNSRecord) => r.level;
 
 /** Issues shown in the status column, most severe first. */
 export function statusIssues(r: DNSRecord): Issue[] {
@@ -53,6 +50,11 @@ export function isLocalIP(s: string) {
   return /^127\./.test(s) || s === '0.0.0.0' || s === '::1' || s === '::';
 }
 
+/** Warning for proxying an internal address (A/AAAA only), or ''. */
+export function proxyWarning(type: string, proxied: boolean, content: string) {
+  return proxied && (type === 'A' || type === 'AAAA') && isPrivateIP(content.trim()) ? '內網位址無法經 Cloudflare Proxy 連線，請取消勾選 Proxy。' : '';
+}
+
 export function isPublicIP(s: string) {
   return /^[\d.]+$|:/.test(s) && !isPrivateIP(s) && !isLocalIP(s);
 }
@@ -76,16 +78,18 @@ export function dotState(r: DNSRecord, pending: boolean, now: number): { state: 
 
 export type ExpiryView = { text: string; cls: string; tip: string; extend: boolean } | null;
 
-export function expiryView(r: DNSRecord, today: string, warnDays: number): ExpiryView {
+/** How the expiry column shows a record. Urgency comes from the server's
+ * expired/expiring issues (so muting one also calms the column). */
+export function expiryView(r: DNSRecord, today: string): ExpiryView {
   const e = r.meta.expires_at;
   if (!e) return null;
   const days = dayDiff(today, e);
   const tip = `到期日 ${e}${r.meta.auto_delete ? '，到期後自動刪除' : '，到期後不會自動刪除'}`;
-  if (days < 0) return { text: `已過期 ${-days} 日`, cls: 'lv-high', tip, extend: true };
-  if (days === 0) return { text: '今日到期', cls: 'lv-high', tip, extend: true };
-  if (days <= warnDays) return { text: `剩 ${days} 日`, cls: 'lv-medium', tip, extend: true };
-  if (days <= 60) return { text: `剩 ${days} 日`, cls: 'muted', tip, extend: false };
-  return { text: e, cls: 'muted', tip, extend: false };
+  const expired = hasIssue(r, 'expired');
+  const expiring = hasIssue(r, 'expiring');
+  const text = days < 0 ? `已過期 ${-days} 日` : days === 0 ? '今日到期' : days <= 60 ? `剩 ${days} 日` : e;
+  const cls = expired || (expiring && days === 0) ? 'lv-high' : expiring ? 'lv-medium' : 'muted';
+  return { text, cls, tip, extend: expired || expiring };
 }
 
 // ---- filters ----

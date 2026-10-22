@@ -20,6 +20,7 @@ import (
 	"github.com/nycu-sdc/sdc-portal/internal/cloudflare"
 	"github.com/nycu-sdc/sdc-portal/internal/dnsrec"
 	"github.com/nycu-sdc/sdc-portal/internal/httpclient"
+	"github.com/nycu-sdc/sdc-portal/internal/loop"
 	"github.com/nycu-sdc/sdc-portal/internal/model"
 	"github.com/nycu-sdc/sdc-portal/internal/store"
 )
@@ -204,13 +205,11 @@ func (s *Scanner) dnsWorks(ctx context.Context) bool {
 func (s *Scanner) scanEach(ctx context.Context, recs []model.Record, ports []int, dnsOK bool) {
 	var wg sync.WaitGroup
 	for _, r := range recs {
-		wg.Add(1)
 		s.sem <- struct{}{}
-		go func(r model.Record) {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() { <-s.sem }()
 			s.scanAndStore(ctx, r, ports, dnsOK)
-		}(r)
+		})
 	}
 	wg.Wait()
 }
@@ -409,16 +408,14 @@ func (s *Scanner) probeTCP(ctx context.Context, addr string, ports []int, res *R
 	open := make([]bool, len(ports))
 	var wg sync.WaitGroup
 	for i, p := range ports {
-		wg.Add(1)
-		go func(i, p int) {
-			defer wg.Done()
+		wg.Go(func() {
 			d := net.Dialer{Timeout: s.Timeout}
 			c, err := d.DialContext(ctx, "tcp", net.JoinHostPort(addr, strconv.Itoa(p)))
 			if err == nil {
 				c.Close()
 				open[i] = true
 			}
-		}(i, p)
+		})
 	}
 	wg.Wait()
 	var openPorts []int
@@ -436,17 +433,5 @@ func (s *Scanner) probeTCP(ctx context.Context, addr string, ports []int, res *R
 	}
 }
 
-// Run scans on the configured interval until ctx is done.
-func (s *Scanner) Run(ctx context.Context) {
-	s.RunOnce(ctx)
-	t := time.NewTicker(s.Interval)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			s.RunOnce(ctx)
-		}
-	}
-}
+// Run repeats RunOnce on the configured interval until ctx is done.
+func (s *Scanner) Run(ctx context.Context) { loop.Every(ctx, s.Interval, s.RunOnce) }

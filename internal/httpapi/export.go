@@ -14,13 +14,6 @@ import (
 var exportHeader = []string{"name", "type", "content", "proxied", "ttl", "comment", "owner", "purpose", "notes", "expires_at",
 	"auto_delete", "no_scan", "listed_title", "listed_category", "group", "reachable", "last_ok", "issues"}
 
-func boolStr(b bool) string {
-	if b {
-		return "true"
-	}
-	return "false"
-}
-
 // cell neutralizes values a spreadsheet would treat as a formula. A value
 // that already starts with "'" is escaped too, so the import side
 // (web/src/admin/lib/csv.ts unescapeCell) can always strip exactly one.
@@ -48,7 +41,7 @@ func (s *Server) apiExportCSV(w http.ResponseWriter, r *http.Request) {
 		o := z.out(rec)
 		reachable, lastOK := "", ""
 		if o.Scan != nil {
-			reachable = boolStr(o.Scan.Reachable == 1)
+			reachable = strconv.FormatBool(o.Scan.Reachable == 1)
 			if o.Scan.LastOKTS != nil {
 				lastOK = time.Unix(int64(*o.Scan.LastOKTS), 0).In(s.Cfg.Timezone).Format("2006-01-02 15:04")
 			}
@@ -66,8 +59,8 @@ func (s *Server) apiExportCSV(w http.ResponseWriter, r *http.Request) {
 		if p := model.Priority(rec.Priority); rec.Type == "MX" && p >= 0 {
 			content = strconv.Itoa(p) + " " + content
 		}
-		row := []string{rec.Name, rec.Type, content, boolStr(rec.Proxied), ttl, rec.Comment, o.Meta.Owner, o.Meta.Purpose, o.Meta.Notes,
-			o.Meta.ExpiresAt, boolStr(o.Meta.AutoDelete), boolStr(o.Meta.NoScan), title, cat, o.Group, reachable, lastOK, strings.Join(issues, "；")}
+		row := []string{rec.Name, rec.Type, content, strconv.FormatBool(rec.Proxied), ttl, rec.Comment, o.Meta.Owner, o.Meta.Purpose, o.Meta.Notes,
+			o.Meta.ExpiresAt, strconv.FormatBool(o.Meta.AutoDelete), strconv.FormatBool(o.Meta.NoScan), title, cat, o.Group, reachable, lastOK, strings.Join(issues, "；")}
 		for i := range row {
 			row[i] = cell(row[i])
 		}

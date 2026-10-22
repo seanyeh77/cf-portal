@@ -1,7 +1,5 @@
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -12,15 +10,13 @@ import { createPortal } from 'react-dom';
 import { keepInTopLayer, onLayerChange, popLayer, pushLayer, topLayer } from './layers';
 
 /** A circular "?" that shows its help text on hover, focus or click. */
-export function Tip({ text, label = '說明' }: { text: string; label?: string }) {
+export function Tip({ text }: { text: string }) {
   return (
-    <button type="button" className="tip-icon" data-tip={text} aria-label={label} aria-expanded="false">
+    <button type="button" className="tip-icon" data-tip={text} aria-label="說明" aria-expanded="false">
       ?
     </button>
   );
 }
-
-const DialogDepth = createContext(0);
 
 type DialogProps = {
   title: ReactNode;
@@ -31,7 +27,6 @@ type DialogProps = {
   className?: string;
   /** Close when the backdrop is clicked. */
   dismissable?: boolean;
-  labelledBy?: string;
   testId?: string;
 };
 
@@ -40,7 +35,6 @@ export function Dialog({ title, onClose, children, footer, width, className, dis
   const ref = useRef<HTMLDialogElement>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
-  const depth = useContext(DialogDepth);
   useLayoutEffect(() => {
     const d = ref.current!;
     if (!d.open) d.showModal();
@@ -54,8 +48,7 @@ export function Dialog({ title, onClose, children, footer, width, className, dis
     };
   }, []);
   return (
-    <DialogDepth.Provider value={depth + 1}>
-      <dialog
+    <dialog
         ref={ref}
         className={'dlg ' + (className ?? '')}
         style={width ? { width } : undefined}
@@ -81,7 +74,45 @@ export function Dialog({ title, onClose, children, footer, width, className, dis
         <div className="dlg-body">{children}</div>
         {footer && <div className="dlg-foot">{footer}</div>}
       </dialog>
-    </DialogDepth.Provider>
+  );
+}
+
+/**
+ * The standard dialog footer: an optional error, optional extra controls on
+ * the left, 取消 and the confirm button.
+ */
+export function DialogActions({
+  error,
+  onCancel,
+  confirm,
+  onConfirm,
+  danger,
+  disabled,
+  cancelFirst,
+  extra,
+}: {
+  error?: string;
+  onCancel: () => void;
+  confirm: string;
+  onConfirm: () => void;
+  danger?: boolean;
+  disabled?: boolean;
+  /** Focus 取消 first (destructive confirmations). */
+  cancelFirst?: boolean;
+  extra?: ReactNode;
+}) {
+  return (
+    <>
+      {extra}
+      {error && <span className="lv-high small foot-error">{error}</span>}
+      <span className="spacer" />
+      <button type="button" className="btn" data-autofocus={cancelFirst || undefined} onClick={onCancel}>
+        取消
+      </button>
+      <button type="button" className={'btn ' + (danger ? 'danger' : 'primary')} disabled={disabled} onClick={onConfirm}>
+        {confirm}
+      </button>
+    </>
   );
 }
 
@@ -102,7 +133,6 @@ export function MenuButton({
   items,
   className = 'btn',
   ariaLabel,
-  title,
   testId,
   align = 'right',
 }: {
@@ -110,7 +140,6 @@ export function MenuButton({
   items: MenuItem[];
   className?: string;
   ariaLabel?: string;
-  title?: string;
   testId?: string;
   align?: 'left' | 'right';
 }) {
@@ -125,7 +154,6 @@ export function MenuButton({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={ariaLabel}
-        data-tip={title}
         data-testid={testId}
         onClick={(e) => {
           e.stopPropagation();
@@ -324,16 +352,7 @@ export function ConfirmHost() {
       onClose={() => done(false)}
       width={cur.width ?? 480}
       testId="confirm-dialog"
-      footer={
-        <>
-          <button type="button" className="btn" data-autofocus onClick={() => done(false)}>
-            取消
-          </button>
-          <button type="button" className={'btn ' + (cur.danger ? 'danger' : 'primary')} onClick={() => done(true)}>
-            {cur.confirmText ?? '確認'}
-          </button>
-        </>
-      }
+      footer={<DialogActions onCancel={() => done(false)} confirm={cur.confirmText ?? '確認'} danger={cur.danger} onConfirm={() => done(true)} cancelFirst />}
     >
       {cur.body}
     </Dialog>

@@ -12,8 +12,6 @@ import (
 	"github.com/nycu-sdc/sdc-portal/internal/snapshots"
 )
 
-func strconvF(f float64) string { return strconv.FormatFloat(f, 'f', -1, 64) }
-
 var hexColor = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 
 // settingLimits are the editable settings and their maximum lengths.
@@ -90,8 +88,7 @@ func normalizeSetting(k, v string) (string, error) {
 
 func (s *Server) apiPutSettings(w http.ResponseWriter, r *http.Request) {
 	var b map[string]any
-	if err := decode(w, r, &b); err != nil {
-		writeAnyErr(w, err)
+	if !decode(w, r, &b) {
 		return
 	}
 	ctx := r.Context()
@@ -109,7 +106,7 @@ func (s *Server) apiPutSettings(w http.ResponseWriter, r *http.Request) {
 		case bool:
 			v = map[bool]string{true: "1", false: "0"}[t]
 		case float64:
-			v = strconvF(t)
+			v = strconv.FormatFloat(t, 'f', -1, 64)
 		default:
 			continue
 		}

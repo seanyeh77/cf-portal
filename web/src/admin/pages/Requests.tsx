@@ -2,9 +2,9 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api, errMsg } from '../../shared/api';
 import { fmtDateTimeShort } from '../../shared/format';
-import { Dialog, Tip, toast } from '../../shared/ui';
+import { Dialog, DialogActions, Tip, toast } from '../../shared/ui';
 import { refreshRecords, useRecords } from '../lib/data';
-import { isPrivateIP, PROXIABLE, REQUEST_TYPES, sub } from '../lib/records';
+import { PROXIABLE, proxyWarning, REQUEST_TYPES, sub } from '../lib/records';
 import type { RecordsData, RequestItem } from '../types';
 
 type Resp = { requests: RequestItem[]; enabled: boolean };
@@ -124,21 +124,10 @@ function ApproveDialog({ req, data, onClose, onDone }: { req: RequestItem; data:
       onClose={onClose}
       width={620}
       testId="approve-dialog"
-      footer={
-        <>
-          {error && <span className="lv-high small foot-error">{error}</span>}
-          <span className="spacer" />
-          <button type="button" className="btn" onClick={onClose}>
-            取消
-          </button>
-          <button type="button" className="btn primary" disabled={busy} onClick={submit}>
-            核准並建立
-          </button>
-        </>
-      }
+      footer={<DialogActions error={error} onCancel={onClose} confirm="核准並建立" disabled={busy} onConfirm={submit} />}
     >
       {req.conflict && <div className="warnbox">{req.conflict}</div>}
-      {proxied && isPrivateIP(content) && <div className="warnbox">內網位址無法經 Cloudflare Proxy 連線，請取消勾選 Proxy。</div>}
+      {proxyWarning(type, proxied, content) && <div className="warnbox">{proxyWarning(type, proxied, content)}</div>}
       <div className="two">
         <div className="field">
           <label htmlFor="ap-type">Type</label>
@@ -213,18 +202,7 @@ function RejectDialog({ req, onClose, onDone }: { req: RequestItem; onClose: () 
       onClose={onClose}
       width={520}
       testId="reject-dialog"
-      footer={
-        <>
-          {error && <span className="lv-high small foot-error">{error}</span>}
-          <span className="spacer" />
-          <button type="button" className="btn" onClick={onClose}>
-            取消
-          </button>
-          <button type="button" className="btn danger" onClick={submit}>
-            駁回
-          </button>
-        </>
-      }
+      footer={<DialogActions error={error} onCancel={onClose} confirm="駁回" danger onConfirm={submit} />}
     >
       <div className="field">
         <label htmlFor="rj-note">原因（申請人可見）</label>

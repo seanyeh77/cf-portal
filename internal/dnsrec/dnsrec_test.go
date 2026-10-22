@@ -10,8 +10,6 @@ import (
 
 const zone = "sdc.nycu.club"
 
-func intp(i int) *int { return &i }
-
 func TestNormalizeName(t *testing.T) {
 	cases := map[string]string{
 		"grafana":                "grafana.sdc.nycu.club",
@@ -50,7 +48,7 @@ func TestValidate(t *testing.T) {
 		{"cname self", model.RecordInput{Type: "CNAME", Name: "x", Content: "x.sdc.nycu.club."}, "CNAME 不可指向自己"},
 		{"cname ok", model.RecordInput{Type: "CNAME", Name: "x", Content: "Me.GitHub.io."}, ""},
 		{"mx no prio", model.RecordInput{Type: "MX", Name: "@", Content: "mx.example.com"}, "MX records need a priority"},
-		{"mx ok", model.RecordInput{Type: "MX", Name: "@", Content: "mx.example.com", Priority: intp(10)}, ""},
+		{"mx ok", model.RecordInput{Type: "MX", Name: "@", Content: "mx.example.com", Priority: new(10)}, ""},
 		{"ttl bad", model.RecordInput{Type: "A", Name: "x", Content: "10.0.0.1", TTL: 30}, "ttl must be 1 (auto) or 60 to 86400 seconds"},
 		{"ttl too big", model.RecordInput{Type: "A", Name: "x", Content: "10.0.0.1", TTL: 90000}, "ttl must be 1"},
 		{"ttl proxied forced", model.RecordInput{Type: "A", Name: "x", Content: "1.2.3.4", TTL: 30, Proxied: true}, ""},

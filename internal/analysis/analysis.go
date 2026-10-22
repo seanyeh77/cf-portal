@@ -25,7 +25,7 @@ var LevelRank = map[string]int{High: 0, Medium: 1, Low: 2, Info: 3}
 
 // Kind describes one kind of issue.
 type Kind struct {
-	Key   string `json:"-"`
+	Key   string `json:"key"`
 	Level string `json:"level"`
 	Label string `json:"label"`
 	Help  string `json:"help"`
@@ -118,11 +118,10 @@ func (r RecordResult) Level() string {
 
 // Result is the output of Analyze.
 type Result struct {
-	Records      map[string]*RecordResult
-	Summary      map[string]int
-	MutedSummary map[string]int
-	Groups       [][2]any
-	Targets      map[string][]string
+	Records map[string]*RecordResult
+	Summary map[string]int
+	Groups  [][2]any
+	Targets map[string][]string
 }
 
 func newIssue(kind, detail string) Issue {
@@ -357,7 +356,7 @@ func Analyze(in Input) *Result {
 		raw[id] = append(raw[id], is)
 	}
 
-	res := &Result{Records: map[string]*RecordResult{}, Summary: map[string]int{}, MutedSummary: map[string]int{}, Targets: map[string][]string{}}
+	res := &Result{Records: map[string]*RecordResult{}, Summary: map[string]int{}, Targets: map[string][]string{}}
 	groupCount := map[string]int{}
 	for _, r := range in.Records {
 		issues := raw[r.ID]
@@ -372,7 +371,6 @@ func Analyze(in Input) *Result {
 		for _, is := range issues {
 			if in.Mutes[r.ID][is.Kind] {
 				rr.Muted = append(rr.Muted, is)
-				res.MutedSummary[is.Kind]++
 			} else {
 				rr.Issues = append(rr.Issues, is)
 				res.Summary[is.Kind]++

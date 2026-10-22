@@ -106,8 +106,8 @@ function StatusCell({ r, pending }: { r: DNSRecord; pending: boolean }) {
   );
 }
 
-function ExpiryCell({ r, today, warn }: { r: DNSRecord; today: string; warn: number }) {
-  const v = expiryView(r, today, warn);
+function ExpiryCell({ r, today }: { r: DNSRecord; today: string }) {
+  const v = expiryView(r, today);
   if (!v) return null;
   return (
     <div className="expiry-cell">
@@ -161,7 +161,6 @@ const Row = memo(function Row({
   r,
   zone,
   today,
-  warn,
   selected,
   pending,
   showExpiry,
@@ -169,7 +168,6 @@ const Row = memo(function Row({
   r: DNSRecord;
   zone: string;
   today: string;
-  warn: number;
   selected: boolean;
   pending: boolean;
   showExpiry: boolean;
@@ -256,7 +254,7 @@ const Row = memo(function Row({
       </td>
       {showExpiry && (
         <td className="c-expiry">
-          <ExpiryCell r={r} today={today} warn={warn} />
+          <ExpiryCell r={r} today={today} />
         </td>
       )}
       <td className="c-actions">
@@ -281,7 +279,6 @@ function RecordsView({ data }: { data: RecordsData }) {
   const view = useStore(viewStore);
   const selection = useStore(selectionStore);
   const pending = useMemo(() => new Set(data.scan.pending), [data]);
-  const warn = +data.settings.expiry_warn_days || 14;
   const f = view.filters;
   const zone = data.zone;
 
@@ -338,7 +335,6 @@ function RecordsView({ data }: { data: RecordsData }) {
       r={r}
       zone={zone}
       today={data.today}
-      warn={warn}
       selected={selection.has(r.id)}
       pending={pending.has(r.id)}
       showExpiry={showExpiry}

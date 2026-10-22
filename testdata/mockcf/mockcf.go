@@ -64,8 +64,6 @@ func newID() string {
 	return hex.EncodeToString(b)
 }
 
-func ip(n int) *int { return &n }
-
 // Seed returns the default records.
 func Seed() []*Record {
 	ts := time.Date(2026, 3, 1, 8, 0, 0, 0, time.UTC).Format(time.RFC3339)
@@ -92,8 +90,8 @@ func Seed() []*Record {
 		mk("SRV", "_minecraft._tcp", "0 25565 mc.sdc.nycu.club", false),
 	}
 	recs[0].TTL = 300
-	recs[11].Priority = ip(10)
-	recs[12].Priority = ip(10)
+	recs[11].Priority = new(10)
+	recs[12].Priority = new(10)
 	recs[12].TTL = 3600
 	for i := 0; i < 20; i++ {
 		recs = append(recs, mk("A", fmt.Sprintf("student%03d", i), fmt.Sprintf("10.0.3.%d", 100+i), false))

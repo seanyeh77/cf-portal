@@ -118,19 +118,19 @@ func serve() error {
 		return fmt.Errorf("open database %s: %w", cfg.DBPath, err)
 	}
 	defer st.Close()
+	st.Defaults = store.DefaultSettings(cfg.PortalTitle)
 
 	cf := cloudflare.New(cfg.CFAPIBase, cfg.CFAPIToken, cfg.CFZoneName, cfg.CFZoneID)
 	snaps := &snapshots.Store{Dir: st.Dir + "/snapshots", Loc: cfg.Timezone}
 	icons := assets.NewFetcher(st.Dir+"/icons", cfg.SimpleIconsBase, cfg.CheckTimeout*2, cfg.CheckVerifyTLS)
 	hc := health.New(st, cfg.CheckInterval, cfg.CheckTimeout, cfg.CheckVerifyTLS)
 	ports := func(ctx context.Context) []int {
-		set, err := st.Settings(ctx, store.DefaultSettings(cfg.PortalTitle))
-		if err == nil {
-			if p, err := scanner.ParsePorts(set["scan_ports"]); err == nil {
-				return p
-			}
+		set, _ := st.Settings(ctx) // falls back to the defaults on error
+		p, err := scanner.ParsePorts(set["scan_ports"])
+		if err != nil {
+			p, _ = scanner.ParsePorts(st.Defaults["scan_ports"])
 		}
-		return []int{443, 80, 22}
+		return p
 	}
 	sc := scanner.New(cf, st, cfg.ScanTimeout, cfg.RecordScanEvery, cfg.ScanDNSCanary, ports)
 	mt := &scanner.Maint{CF: cf, Store: st, Snaps: snaps, Loc: cfg.Timezone, Keep: cfg.SnapshotKeep, Interval: cfg.MaintInterval}

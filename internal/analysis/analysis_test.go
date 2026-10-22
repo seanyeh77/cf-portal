@@ -18,8 +18,6 @@ func rec(id, typ, name, content string) model.Record {
 	return model.Record{ID: id, Type: typ, Name: name + "." + zone, Content: content, TTL: 1}
 }
 
-func f(v float64) *float64 { return &v }
-
 type fixture struct {
 	recs  []model.Record
 	meta  map[string]model.Meta
@@ -207,12 +205,12 @@ func TestZombie(t *testing.T) {
 	fx := newFixture(rec("1", "A", "a", "10.0.0.1"), rec("2", "A", "b", "10.0.0.2"), rec("3", "A", "c", "10.0.0.3"), rec("4", "A", "d", "10.0.0.4"), rec("5", "A", "e", "10.0.0.5"))
 	day := 86400.0
 	n := float64(now.Unix())
-	fx.scans["1"] = model.Scan{FirstTS: n - 30*day, LastTS: n, LastOKTS: f(n - 5*day - 100), Reachable: 0}
+	fx.scans["1"] = model.Scan{FirstTS: n - 30*day, LastTS: n, LastOKTS: new(n - 5*day - 100), Reachable: 0}
 	fx.scans["2"] = model.Scan{FirstTS: n - 8*day, LastTS: n, Reachable: 0}
-	fx.scans["3"] = model.Scan{FirstTS: n - 30*day, LastTS: n, LastOKTS: f(n - 8*day), Reachable: 0}
+	fx.scans["3"] = model.Scan{FirstTS: n - 30*day, LastTS: n, LastOKTS: new(n - 8*day), Reachable: 0}
 	fx.scans["4"] = model.Scan{FirstTS: n - 30*day, LastTS: n, Reachable: 0}
 	fx.meta["4"] = model.Meta{Owner: "x", NoScan: true}
-	fx.scans["5"] = model.Scan{FirstTS: n - 30*day, LastTS: n, LastOKTS: f(n - 30*day), Reachable: 1}
+	fx.scans["5"] = model.Scan{FirstTS: n - 30*day, LastTS: n, LastOKTS: new(n - 30*day), Reachable: 1}
 	r := fx.run()
 	if has(r, "1", "zombie") {
 		t.Error("5 days is below threshold")
@@ -301,8 +299,8 @@ func TestMutesAndLevel(t *testing.T) {
 	if has(r, "1", "no_owner") || r.Records["1"].Level() != "" || len(r.Records["1"].Muted) != 2 {
 		t.Errorf("muted: %+v", r.Records["1"])
 	}
-	if r.Summary["no_owner"] != 0 || r.MutedSummary["no_owner"] != 1 || r.Summary["private_ip"] != 1 {
-		t.Errorf("summary %v muted %v", r.Summary, r.MutedSummary)
+	if r.Summary["no_owner"] != 0 || r.Summary["private_ip"] != 1 {
+		t.Errorf("summary %v", r.Summary)
 	}
 }
 

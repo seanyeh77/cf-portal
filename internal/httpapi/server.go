@@ -204,13 +204,16 @@ func writeAnyErr(w http.ResponseWriter, err error) {
 // maxJSONBody limits JSON request bodies; uploads set their own limits.
 const maxJSONBody = 4 << 20
 
-func decode(w http.ResponseWriter, r *http.Request, v any) error {
+func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxJSONBody)).Decode(v)
-	var tooBig *http.MaxBytesError
-	if err != nil && !errors.As(err, &tooBig) {
-		return &dnsrec.ValidationError{Msg: "請求格式錯誤：" + err.Error()}
+	if err == nil {
+		return true
 	}
-	return err
+	if !errors.As(err, new(*http.MaxBytesError)) {
+		err = &dnsrec.ValidationError{Msg: "請求格式錯誤：" + err.Error()}
+	}
+	writeAnyErr(w, err)
+	return false
 }
 
 func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
@@ -234,10 +237,9 @@ func (s *Server) auditLog(r *http.Request, action, target string, detail any) {
 }
 
 func (s *Server) settings(ctx context.Context) map[string]string {
-	set, err := s.Store.Settings(ctx, store.DefaultSettings(s.Cfg.PortalTitle))
+	set, err := s.Store.Settings(ctx)
 	if err != nil {
-		log.Printf("settings: %v", err)
-		return store.DefaultSettings(s.Cfg.PortalTitle)
+		log.Printf("settings: %v", err) // set still holds the defaults
 	}
 	return set
 }

@@ -559,3 +559,21 @@ func TestMetaForMissingRecord(t *testing.T) {
 		t.Fatalf("orphan meta written: %v", m)
 	}
 }
+
+func TestNameRuleOnNewNamesOnly(t *testing.T) {
+	e := newEnv(t)
+	e.login()
+	if w := e.do("POST", "/api/records", map[string]any{"type": "A", "name": "Bad_Name", "content": "10.0.0.1"}); w.Code != 422 || !strings.Contains(w.Body.String(), "名稱格式不符") {
+		t.Fatalf("create with bad name: %d %s", w.Code, w.Body.String())
+	}
+	g := e.mock.Find("A", "gitlab")
+	if w := e.do("PATCH", "/api/records/"+g.ID, map[string]any{"name": "Git_Lab"}); w.Code != 422 {
+		t.Fatalf("rename to bad name: %d", w.Code)
+	}
+	// An existing name that breaks the rule can still be edited and restored.
+	old := e.mock.Find("A", "Old_Box")
+	e.mustOK(e.do("PATCH", "/api/records/"+old.ID, map[string]any{"content": "10.0.2.6"}))
+	e.mustOK(e.do("DELETE", "/api/records/"+old.ID, nil))
+	del := e.audits()[0]["detail"].(map[string]any)
+	e.mustOK(e.do("POST", "/api/records/restore", map[string]any{"mode": "recreate", "data": del["before"]}))
+}

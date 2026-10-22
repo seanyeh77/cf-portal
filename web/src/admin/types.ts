@@ -60,6 +60,8 @@ export type DNSRecord = {
   modified_on?: string;
   editable: boolean;
   group: string;
+  /** Row level from the server: the most severe non-info issue, or ''. */
+  level: Level | '';
   /** Canonical target for A/AAAA/CNAME, the key of RecordsData.targets. */
   target_key: string;
   listing: Listing | null;
@@ -90,7 +92,6 @@ export type RecordsData = {
   records: DNSRecord[];
   orphans: { record_id: string; hostname: string; title: string }[];
   summary: Record<string, number>;
-  muted_summary: Record<string, number>;
   kinds: Record<string, Kind>;
   kind_order: string[];
   groups: [string, number][];

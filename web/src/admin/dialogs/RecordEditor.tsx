@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, errMsg } from '../../shared/api';
 import { addMonth, semesterEnd } from '../../shared/format';
-import { confirmDialog, Dialog, Tip, toast } from '../../shared/ui';
+import { confirmDialog, Dialog, DialogActions, Tip, toast } from '../../shared/ui';
 import { refreshRecords } from '../lib/data';
 import {
   dependents,
   fqdn,
-  isPrivateIP,
   isPublicIP,
+  proxyWarning,
   nameRuleError,
   normTarget,
   PROXIABLE,
@@ -94,7 +94,8 @@ export function RecordEditor({ record, data, focus }: { record?: DNSRecord; data
     const identical = sameType.some((o) => normTarget(o.content) === normTarget(content));
     warnings.push(identical ? `已有相同的 ${type} record。` : `${fullName} 已有 ${sameType.length} 筆 ${type} record，儲存後會同時存在。`);
   }
-  if (proxied && canProxy && isPrivateIP(content.trim())) warnings.push('內網位址無法經 Cloudflare Proxy 連線，請取消勾選 Proxy。');
+  const proxyWarn = proxyWarning(type, proxied, content);
+  if (proxyWarn) warnings.push(proxyWarn);
 
   const form: DNSForm = { type, name: fullName, content: content.trim(), ttl: proxied && canProxy ? 1 : ttl, proxied: proxied && canProxy };
 
@@ -169,18 +170,7 @@ export function RecordEditor({ record, data, focus }: { record?: DNSRecord; data
       width={880}
       className="editor"
       testId="record-editor"
-      footer={
-        <>
-          {error && <span className="lv-high small foot-error">{error}</span>}
-          <span className="spacer" />
-          <button type="button" className="btn" onClick={closeModal}>
-            取消
-          </button>
-          <button type="button" className="btn primary" disabled={busy} onClick={save}>
-            {isNew ? '新增' : '儲存'}
-          </button>
-        </>
-      }
+      footer={<DialogActions error={error} onCancel={closeModal} confirm={isNew ? '新增' : '儲存'} disabled={busy} onConfirm={save} />}
     >
       <form
         className="editor-grid"

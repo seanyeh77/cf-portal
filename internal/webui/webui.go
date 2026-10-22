@@ -25,12 +25,9 @@ const marker = "<!--INIT-->"
 const fallback = `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>SDC Services</title></head>
 <body><p>前端尚未建置，請執行 npm run build。</p>` + marker + `</body></html>`
 
-// Page returns an HTML entry (portal or admin) with data injected as the
-// initial state. JSON encoding escapes <, > and &, so the data cannot close
-// the script element.
-func Page(name string, data any) []byte { return Render(Assets, name, data) }
-
-// Render is Page for an arbitrary file system.
+// Render returns an HTML entry (portal or admin) from fsys with data
+// injected as the initial state. JSON encoding escapes <, > and &, so the
+// data cannot close the script element.
 func Render(fsys fs.FS, name string, data any) []byte {
 	html, err := fs.ReadFile(fsys, name+".html")
 	if err != nil {

@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { api, errMsg } from '../../shared/api';
-import { confirmDialog, Dialog, Tip, toast } from '../../shared/ui';
-import { refreshRecords } from '../lib/data';
+import { confirmDialog, Dialog, DialogActions, Tip, toast } from '../../shared/ui';
+import { act, refreshRecords } from '../lib/data';
 import { sub } from '../lib/records';
 import { closeModal } from '../lib/store';
 import type { DNSRecord, Listing, RecordsData } from '../types';
@@ -96,27 +96,12 @@ export function ListingDialog({ record, data }: { record: DNSRecord; data: Recor
   };
 
   const refetch = async () => {
-    try {
-      const res = await api<{ listing: Listing }>('POST', `/api/listings/${record.id}/icon/refresh`);
-      setCurrent(res.listing);
-      toast('已重新取得圖示');
-      refreshRecords();
-    } catch (e) {
-      toast(errMsg(e), { error: true });
-    }
+    await act(async () => setCurrent((await api<{ listing: Listing }>('POST', `/api/listings/${record.id}/icon/refresh`)).listing), '已重新取得圖示');
   };
 
   const remove = async () => {
     const ok = await confirmDialog({ title: '從入口下架', body: <p>「{l?.title}」將不再顯示於服務入口。</p>, confirmText: '下架', danger: true });
-    if (!ok) return;
-    try {
-      await api('DELETE', `/api/listings/${record.id}`);
-      toast('已下架');
-      closeModal();
-      refreshRecords();
-    } catch (e) {
-      toast(errMsg(e), { error: true });
-    }
+    if (ok && (await act(() => api('DELETE', `/api/listings/${record.id}`), '已下架'))) closeModal();
   };
 
   const previewURL = mode === 'none' ? '' : mode === 'si' ? (current?.icon === iconValue ? current?.icon_url : '') : mode === initialMode || mode === 'upload' ? current?.icon_url ?? '' : '';
@@ -128,21 +113,20 @@ export function ListingDialog({ record, data }: { record: DNSRecord; data: Recor
       width={640}
       testId="listing-dialog"
       footer={
-        <>
-          {!isNew && (
-            <button type="button" className="btn danger-text" onClick={remove}>
-              下架
-            </button>
-          )}
-          {error && <span className="lv-high small foot-error">{error}</span>}
-          <span className="spacer" />
-          <button type="button" className="btn" onClick={closeModal}>
-            取消
-          </button>
-          <button type="button" className="btn primary" disabled={busy} onClick={save}>
-            儲存
-          </button>
-        </>
+        <DialogActions
+          error={error}
+          onCancel={closeModal}
+          confirm="儲存"
+          disabled={busy}
+          onConfirm={save}
+          extra={
+            !isNew && (
+              <button type="button" className="btn danger-text" onClick={remove}>
+                下架
+              </button>
+            )
+          }
+        />
       }
     >
       <p className="small muted mono">{record.name}</p>

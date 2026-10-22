@@ -34,6 +34,8 @@ type recordOut struct {
 	model.Record
 	Editable bool   `json:"editable"`
 	Group    string `json:"group"`
+	// Level is the row level: the most severe non-info issue, or "".
+	Level string `json:"level"`
 	// TargetKey is the canonical target used by "targets" (A/AAAA/CNAME).
 	TargetKey string           `json:"target_key"`
 	Listing   *listingOut      `json:"listing"`
@@ -55,16 +57,8 @@ type zoneState struct {
 	Analysis *analysis.Result
 }
 
-func atoiDef(s string, def int) int {
-	n, err := strconv.Atoi(strings.TrimSpace(s))
-	if err != nil {
-		return def
-	}
-	return n
-}
-
 func analysisSettings(set map[string]string) analysis.Settings {
-	return analysis.Settings{ZombieDays: atoiDef(set["zombie_days"], 7), ExpiryWarnDays: atoiDef(set["expiry_warn_days"], 14), NameRule: set["name_rule"]}
+	return analysis.Settings{ZombieDays: store.SettingInt(set, "zombie_days"), ExpiryWarnDays: store.SettingInt(set, "expiry_warn_days"), NameRule: set["name_rule"]}
 }
 
 func (s *Server) loadZone(ctx context.Context, fresh bool) (*zoneState, error) {
@@ -97,7 +91,7 @@ func (s *Server) loadZone(ctx context.Context, fresh bool) (*zoneState, error) {
 func (z *zoneState) out(r model.Record) recordOut {
 	o := recordOut{Record: r, Editable: dnsrec.Editable[r.Type], TargetKey: analysis.TargetKey(r), Meta: z.Meta[r.ID], Issues: []analysis.Issue{}, Muted: []analysis.Issue{}}
 	if ar := z.Analysis.Records[r.ID]; ar != nil {
-		o.Issues, o.Muted, o.Group = ar.Issues, ar.Muted, ar.Group
+		o.Issues, o.Muted, o.Group, o.Level = ar.Issues, ar.Muted, ar.Group, ar.Level()
 	}
 	if l, ok := z.Listings[r.ID]; ok {
 		o.Listing = toListingOut(&l)
@@ -134,10 +128,6 @@ func (s *Server) apiRecords(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	sort.Slice(orphans, func(i, j int) bool { return orphans[i]["hostname"].(string) < orphans[j]["hostname"].(string) })
-	kinds := map[string]analysis.Kind{}
-	for _, k := range analysis.Kinds {
-		kinds[k.Key] = k
-	}
 	pending, _ := s.Store.PendingRequests(ctx)
 	var lastSnap float64
 	if t := s.Snaps.Latest(); !t.IsZero() {
@@ -146,20 +136,12 @@ func (s *Server) apiRecords(w http.ResponseWriter, r *http.Request) {
 	set := z.Settings
 	writeJSON(w, http.StatusOK, map[string]any{
 		"zone": s.Cfg.CFZoneName, "today": s.today(), "synced_at": float64(z.SyncedAt.Unix()), "now": float64(s.Now().Unix()),
-		"records": out, "orphans": orphans, "summary": z.Analysis.Summary, "muted_summary": z.Analysis.MutedSummary,
-		"kinds": kinds, "kind_order": kindOrder(), "groups": z.Analysis.Groups, "targets": z.Analysis.Targets,
+		"records": out, "orphans": orphans, "summary": z.Analysis.Summary,
+		"kinds": analysis.Kinds, "groups": z.Analysis.Groups, "targets": z.Analysis.Targets,
 		"scan": s.Scanner.Status(), "pending_requests": pending, "last_snapshot": lastSnap,
 		"settings": map[string]string{"zombie_days": set["zombie_days"], "expiry_warn_days": set["expiry_warn_days"], "scan_ports": set["scan_ports"],
 			"name_rule_hint": set["name_rule_hint"], "name_rule": set["name_rule"], "requests_enabled": set["requests_enabled"]},
 	})
-}
-
-func kindOrder() []string {
-	out := make([]string, len(analysis.Kinds))
-	for i, k := range analysis.Kinds {
-		out[i] = k.Key
-	}
-	return out
 }
 
 // ---- meta validation ----
@@ -347,22 +329,31 @@ func (s *Server) nextMeta(ctx context.Context, id string, change func(model.Meta
 
 // ---- create / update / delete ----
 
-type createBody struct {
+// recordBody is a record to create, with optional meta.
+type recordBody struct {
 	model.RecordInput
-	Meta *model.Meta `json:"meta"`
+	Meta model.Meta `json:"meta"`
+}
+
+// checkNameRule refuses names that break the naming rule. It applies to
+// new names only; existing (and restored) names may keep breaking it.
+func (s *Server) checkNameRule(ctx context.Context, name string) error {
+	if msg := dnsrec.NameRuleError(dnsrec.NormalizeName(name, s.Cfg.CFZoneName), s.Cfg.CFZoneName, s.settings(ctx)["name_rule"]); msg != "" {
+		return invalidf("名稱格式不符：" + msg)
+	}
+	return nil
 }
 
 func (s *Server) apiCreateRecord(w http.ResponseWriter, r *http.Request) {
-	var b createBody
-	if err := decode(w, r, &b); err != nil {
+	var b recordBody
+	if !decode(w, r, &b) {
+		return
+	}
+	if err := s.checkNameRule(r.Context(), b.Name); err != nil {
 		writeAnyErr(w, err)
 		return
 	}
-	var meta model.Meta
-	if b.Meta != nil {
-		meta = *b.Meta
-	}
-	rec, scanning, err := s.createRecord(r, b.RecordInput, meta, "record_create", nil)
+	rec, scanning, err := s.createRecord(r, b.RecordInput, b.Meta, "record_create", nil)
 	if err != nil {
 		writeAnyErr(w, err)
 		return
@@ -410,8 +401,7 @@ func (b updateBody) apply(in model.RecordInput) model.RecordInput {
 func (s *Server) apiUpdateRecord(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var b updateBody
-	if err := decode(w, r, &b); err != nil {
-		writeAnyErr(w, err)
+	if !decode(w, r, &b) {
 		return
 	}
 	ctx := r.Context()
@@ -434,6 +424,12 @@ func (s *Server) apiUpdateRecord(w http.ResponseWriter, r *http.Request) {
 		}
 		// Normalization can turn a sent change back into the current value.
 		dnsChanged = len(model.ChangedFields(in, before)) > 0
+		if !strings.EqualFold(in.Name, before.Name) {
+			if err := s.checkNameRule(ctx, in.Name); err != nil {
+				writeAnyErr(w, err)
+				return
+			}
+		}
 	}
 	var change func(model.Meta) model.Meta
 	if b.Meta != nil {
@@ -533,8 +529,7 @@ func (s *Server) recordName(ctx context.Context, id string) string {
 
 func (s *Server) apiPutMeta(w http.ResponseWriter, r *http.Request) {
 	var p model.MetaPatch
-	if err := decode(w, r, &p); err != nil {
-		writeAnyErr(w, err)
+	if !decode(w, r, &p) {
 		return
 	}
 	s.replaceMeta(w, r, r.PathValue("id"), p.Apply, nil)
@@ -580,8 +575,7 @@ func (s *Server) apiBulkMeta(w http.ResponseWriter, r *http.Request) {
 		IDs []string        `json:"ids"`
 		Set model.MetaPatch `json:"set"`
 	}
-	if err := decode(w, r, &b); err != nil {
-		writeAnyErr(w, err)
+	if !decode(w, r, &b) {
 		return
 	}
 	if len(b.IDs) == 0 {
@@ -629,8 +623,7 @@ func (s *Server) apiBulkDelete(w http.ResponseWriter, r *http.Request) {
 	var b struct {
 		IDs []string `json:"ids"`
 	}
-	if err := decode(w, r, &b); err != nil {
-		writeAnyErr(w, err)
+	if !decode(w, r, &b) {
 		return
 	}
 	if len(b.IDs) == 0 {
@@ -647,220 +640,27 @@ func (s *Server) apiBulkDelete(w http.ResponseWriter, r *http.Request) {
 	for _, rec := range recs {
 		byID[rec.ID] = rec
 	}
-	results := []itemResult{}
-	okN := 0
-	for _, id := range b.IDs {
+	results := make([]itemResult, len(b.IDs))
+	forEachCF(len(b.IDs), func(i int) {
+		id := b.IDs[i]
 		rec, ok := byID[id]
-		if !ok {
-			results = append(results, itemResult{ID: id, Name: id, Error: "record 已不存在"})
-			continue
+		switch {
+		case !ok:
+			results[i] = itemResult{ID: id, Name: id, Error: "record 已不存在"}
+		default:
+			results[i] = itemResult{ID: id, Name: rec.Name, OK: true}
+			if err := s.deleteRecord(r, rec, "record_delete"); err != nil {
+				results[i] = itemResult{ID: id, Name: rec.Name, Error: err.Error()}
+			}
 		}
-		if err := s.deleteRecord(r, rec, "record_delete"); err != nil {
-			results = append(results, itemResult{ID: id, Name: rec.Name, Error: err.Error()})
-			continue
+	})
+	okN := 0
+	for _, res := range results {
+		if res.OK {
+			okN++
 		}
-		okN++
-		results = append(results, itemResult{ID: id, Name: rec.Name, OK: true})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"results": results, "deleted": okN, "failed": len(b.IDs) - okN, "snapshot": info.Name})
-}
-
-// ---- batch ----
-
-type batchRow struct {
-	model.RecordInput
-	Meta *model.Meta `json:"meta"`
-}
-
-type batchResult struct {
-	Index    int    `json:"index"`
-	OK       bool   `json:"ok"`
-	Name     string `json:"name"`
-	Type     string `json:"type"`
-	Content  string `json:"content"`
-	Error    string `json:"error,omitempty"`
-	Warning  string `json:"warning,omitempty"`
-	RecordID string `json:"record_id,omitempty"`
-}
-
-const maxBatch = 500
-
-func (s *Server) apiBatch(w http.ResponseWriter, r *http.Request) {
-	var b struct {
-		Records []batchRow `json:"records"`
-		DryRun  bool       `json:"dry_run"`
-	}
-	if err := decode(w, r, &b); err != nil {
-		writeAnyErr(w, err)
-		return
-	}
-	if len(b.Records) == 0 {
-		writeErr(w, http.StatusUnprocessableEntity, "沒有可建立的資料")
-		return
-	}
-	if len(b.Records) > maxBatch {
-		writeErr(w, http.StatusUnprocessableEntity, "一次最多建立 500 筆")
-		return
-	}
-	ctx := r.Context()
-	existing, _, err := s.CF.List(ctx, true)
-	if err != nil {
-		writeAnyErr(w, err)
-		return
-	}
-	rule := s.settings(ctx)["name_rule"]
-	results := make([]batchResult, len(b.Records))
-	inputs := make([]model.RecordInput, len(b.Records))
-	metas := make([]model.Meta, len(b.Records))
-	// Earlier rows count as existing, so duplicates within the batch are caught.
-	pseudo := append([]model.Record(nil), existing...)
-	ok := 0
-	for i, row := range b.Records {
-		var meta model.Meta
-		if row.Meta != nil {
-			meta = *row.Meta
-		}
-		in, meta, err := s.prepareCreate(row.RecordInput, meta)
-		if err == nil {
-			err = dnsrec.Conflict(in, pseudo, "")
-		}
-		res := batchResult{Index: i, Type: in.Type, Name: in.Name, Content: in.Content}
-		if err != nil {
-			res.Error = err.Error()
-		} else {
-			res.OK = true
-			ok++
-			pseudo = append(pseudo, model.Record{ID: "batch-" + strconv.Itoa(i), Type: in.Type, Name: in.Name, Content: in.Content})
-		}
-		metas[i] = meta
-		if msg := dnsrec.NameRuleError(in.Name, s.Cfg.CFZoneName, rule); msg != "" {
-			res.Warning = "名稱不符規則：" + msg
-		}
-		inputs[i] = in
-		results[i] = res
-	}
-	var created []model.Record
-	if !b.DryRun {
-		for i := range results {
-			if !results[i].OK {
-				continue
-			}
-			rec, err := s.commitCreate(r, inputs[i], metas[i], "record_create", map[string]any{"batch": true})
-			if err != nil {
-				results[i].OK = false
-				results[i].Error = err.Error()
-				ok--
-				continue
-			}
-			results[i].RecordID = rec.ID
-			created = append(created, *rec)
-		}
-		s.Scanner.ScanSoon(created...)
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"results": results, "ok": ok, "skipped": len(results) - ok, "created": len(created), "dry_run": b.DryRun})
-}
-
-// ---- restore ----
-
-type restoreBody struct {
-	Mode     string             `json:"mode"`
-	RecordID string             `json:"record_id"`
-	Data     *model.RecordInput `json:"data"`
-	Meta     *model.Meta        `json:"meta"`
-}
-
-func (s *Server) apiRestore(w http.ResponseWriter, r *http.Request) {
-	var b restoreBody
-	if err := decode(w, r, &b); err != nil {
-		writeAnyErr(w, err)
-		return
-	}
-	switch b.Mode {
-	case "recreate":
-		s.restoreRecreate(w, r, b)
-	case "revert":
-		s.restoreRevert(w, r, b)
-	case "delete":
-		s.restoreDelete(w, r, b)
-	case "meta":
-		s.restoreMeta(w, r, b)
-	default:
-		writeErr(w, http.StatusUnprocessableEntity, "mode 須為 recreate、revert、delete 或 meta")
-	}
-}
-
-func (s *Server) restoreRecreate(w http.ResponseWriter, r *http.Request, b restoreBody) {
-	if b.Data == nil {
-		writeErr(w, http.StatusUnprocessableEntity, "缺少還原資料")
-		return
-	}
-	var meta model.Meta
-	if b.Meta != nil {
-		meta = *b.Meta
-	}
-	rec, _, err := s.createRecord(r, *b.Data, meta, "record_restore", map[string]any{"from_record_id": b.RecordID})
-	if err != nil {
-		writeAnyErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"record": rec})
-}
-
-func (s *Server) restoreRevert(w http.ResponseWriter, r *http.Request, b restoreBody) {
-	if b.Data == nil || b.RecordID == "" {
-		writeErr(w, http.StatusUnprocessableEntity, "缺少還原資料")
-		return
-	}
-	ctx := r.Context()
-	cur, err := s.CF.Get(ctx, b.RecordID)
-	if err != nil {
-		writeAnyErr(w, err)
-		return
-	}
-	in := *b.Data
-	if err := dnsrec.Validate(&in, s.Cfg.CFZoneName); err != nil {
-		writeAnyErr(w, err)
-		return
-	}
-	var change func(model.Meta) model.Meta
-	if b.Meta != nil {
-		change = setMeta(*b.Meta)
-	}
-	metaBefore, metaAfter, err := s.nextMeta(ctx, b.RecordID, change)
-	if err != nil {
-		writeAnyErr(w, err)
-		return
-	}
-	rec, _, err := s.updateRecord(r, *cur, in, metaBefore, metaAfter, "record_restore")
-	if err != nil {
-		writeAnyErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"record": rec})
-}
-
-func (s *Server) restoreDelete(w http.ResponseWriter, r *http.Request, b restoreBody) {
-	if b.RecordID == "" {
-		writeErr(w, http.StatusUnprocessableEntity, "缺少 record_id")
-		return
-	}
-	cur, err := s.CF.Get(r.Context(), b.RecordID)
-	if err == nil {
-		err = s.deleteRecord(r, *cur, "record_restore_delete")
-	}
-	if err != nil {
-		writeAnyErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-func (s *Server) restoreMeta(w http.ResponseWriter, r *http.Request, b restoreBody) {
-	if b.RecordID == "" || b.Meta == nil {
-		writeErr(w, http.StatusUnprocessableEntity, "缺少還原資料")
-		return
-	}
-	s.replaceMeta(w, r, b.RecordID, setMeta(*b.Meta), map[string]any{"restore": true})
 }
 
 func (s *Server) apiMute(w http.ResponseWriter, r *http.Request) {
@@ -869,8 +669,7 @@ func (s *Server) apiMute(w http.ResponseWriter, r *http.Request) {
 		Kind     string `json:"kind"`
 		Muted    bool   `json:"muted"`
 	}
-	if err := decode(w, r, &b); err != nil {
-		writeAnyErr(w, err)
+	if !decode(w, r, &b) {
 		return
 	}
 	if _, ok := analysis.KindByKey[b.Kind]; !ok || b.RecordID == "" {
