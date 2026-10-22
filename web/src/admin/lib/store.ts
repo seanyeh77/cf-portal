@@ -1,9 +1,14 @@
 import { useSyncExternalStore } from 'react';
 import { EMPTY_FILTERS, type Filters, type Sort } from './records';
 
-/** A tiny observable value for state shared across pages and dialogs. */
-export function createStore<T>(initial: T) {
+/**
+ * A tiny observable value for state shared across pages and dialogs.
+ * onActive runs when the first subscriber arrives and returns a function
+ * that runs when the last one leaves.
+ */
+export function createStore<T>(initial: T, onActive?: () => () => void) {
   let value = initial;
+  let stop: (() => void) | undefined;
   const subs = new Set<() => void>();
   return {
     get: () => value,
@@ -13,7 +18,10 @@ export function createStore<T>(initial: T) {
     },
     subscribe(fn: () => void) {
       subs.add(fn);
-      return () => subs.delete(fn);
+      if (subs.size === 1 && onActive) stop = onActive();
+      return () => {
+        if (subs.delete(fn) && subs.size === 0) stop?.();
+      };
     },
   };
 }
@@ -80,22 +88,14 @@ export const selectionStore = createStore<Set<string>>(new Set());
 
 // ---- shared clock for relative times ----
 
-const nowStore = createStore(Date.now() / 1000);
-let clockSubs = 0;
-let clockTimer = 0;
+const tick = () => nowStore.set(Date.now() / 1000);
 
-/** Ticks only while something is subscribed. */
-function subscribeClock(fn: () => void) {
-  const off = nowStore.subscribe(fn);
-  if (clockSubs++ === 0) {
-    nowStore.set(Date.now() / 1000);
-    clockTimer = window.setInterval(() => nowStore.set(Date.now() / 1000), 30000);
-  }
-  return () => {
-    off();
-    if (--clockSubs === 0) window.clearInterval(clockTimer);
-  };
-}
+// Ticks only while something shows a relative time.
+const nowStore = createStore(Date.now() / 1000, () => {
+  tick();
+  const timer = window.setInterval(tick, 30000);
+  return () => window.clearInterval(timer);
+});
 
 /** Seconds since the epoch, updated every 30 s. */
-export const useNow = () => useSyncExternalStore(subscribeClock, nowStore.get, nowStore.get);
+export const useNow = () => useStore(nowStore);

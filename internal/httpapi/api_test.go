@@ -530,3 +530,32 @@ func TestOversizedUpload(t *testing.T) {
 		t.Fatalf("oversized upload: %d %s", w.Code, w.Body.String())
 	}
 }
+
+func TestCloudflareRejectionRollsBackMeta(t *testing.T) {
+	e := newEnv(t)
+	e.login()
+	g := e.mock.Find("A", "grafana")
+	e.mustOK(e.do("PUT", "/api/records/"+g.ID+"/meta", map[string]any{"owner": "原本"}))
+	// The mock rejects proxying a private address after validation passed.
+	w := e.do("PATCH", "/api/records/"+g.ID, map[string]any{"proxied": true, "meta": map[string]any{"owner": "新的"}})
+	if w.Code != 400 || !strings.Contains(w.Body.String(), "Cloudflare: 9003") {
+		t.Fatalf("expected Cloudflare rejection: %d %s", w.Code, w.Body.String())
+	}
+	if m, _ := e.srv.Store.Meta(context.Background(), g.ID); m.Owner != "原本" {
+		t.Fatalf("meta not rolled back: %+v", m)
+	}
+}
+
+func TestMetaForMissingRecord(t *testing.T) {
+	e := newEnv(t)
+	e.login()
+	if w := e.do("PUT", "/api/records/does-not-exist/meta", map[string]any{"owner": "x"}); w.Code != 404 {
+		t.Fatalf("meta for missing record: %d", w.Code)
+	}
+	if w := e.do("POST", "/api/records/restore", map[string]any{"mode": "meta", "record_id": "gone", "meta": map[string]any{"owner": "x"}}); w.Code != 404 {
+		t.Fatalf("meta restore for missing record: %d", w.Code)
+	}
+	if m, _ := e.srv.Store.AllMeta(context.Background()); len(m) != 0 {
+		t.Fatalf("orphan meta written: %v", m)
+	}
+}

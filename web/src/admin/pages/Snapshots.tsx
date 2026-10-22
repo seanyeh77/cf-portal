@@ -13,20 +13,26 @@ export function Snapshots() {
   const q = useQuery({ queryKey: ['snapshots'], queryFn: () => api<{ snapshots: SnapshotInfo[]; keep: number }>('GET', '/api/snapshots') });
   // The comparison is a query, so every mutation's refresh updates it.
   const [compared, setCompared] = useState('');
-  const diffQ = useQuery({
+  const {
+    data: diff,
+    error: diffError,
+    refetch: refetchDiff,
+  } = useQuery({
     queryKey: ['snapshot-diff', compared],
     queryFn: () => api<SnapshotDiff>('GET', `/api/snapshots/${encodeURIComponent(compared)}/diff`),
     enabled: compared !== '',
+    // Each attempt lists the whole zone at Cloudflare.
+    retry: false,
   });
-  const diff = diffQ.data ?? null;
   const [busy, setBusy] = useState(false);
 
   const create = async () => {
     setBusy(true);
-    await act(() => api('POST', '/api/snapshots'), '已建立快照');
+    // A new snapshot does not change the open comparison.
+    await act(() => api('POST', '/api/snapshots'), '已建立快照', ['snapshot-diff']);
     setBusy(false);
   };
-  const compare = (name: string) => (name === compared ? diffQ.refetch() : setCompared(name));
+  const compare = (name: string) => (name === compared ? refetchDiff() : setCompared(name));
   const restore = async (title: string, body: Record<string, unknown>, describe: string, danger = false) => {
     const ok = await confirmDialog({ title, body: <p className="pre">{describe}</p>, confirmText: title, danger });
     if (!ok) return;
@@ -44,7 +50,7 @@ export function Snapshots() {
           立即建立快照
         </button>
       </div>
-      {(q.error || diffQ.error) && <div className="errbox">{errMsg(q.error ?? diffQ.error)}</div>}
+      {(q.error || diffError) && <div className="errbox">{errMsg(q.error ?? diffError)}</div>}
       <table className="plain snap-table">
         <thead>
           <tr>

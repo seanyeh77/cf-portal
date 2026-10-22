@@ -215,15 +215,17 @@ func (s *Server) apiRefreshIcon(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"listing": toListingOut(saved)})
 }
 
+// fileTooLarge reports an upload over its limit (HTTP 413).
+type fileTooLarge struct{ limit int64 }
+
+func (e fileTooLarge) Error() string { return "檔案超過 " + humanSize(e.limit) }
+
 // readUpload reads the "file" part of a multipart form, at most limit bytes.
-// An oversized file is reported as *http.MaxBytesError with limit, however
-// far over it is, so writeAnyErr answers 413 with the file limit.
 func readUpload(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, error) {
-	tooBig := &http.MaxBytesError{Limit: limit}
 	r.Body = http.MaxBytesReader(w, r.Body, limit+64<<10)
 	f, _, err := r.FormFile("file")
 	if errors.As(err, new(*http.MaxBytesError)) {
-		return nil, tooBig
+		return nil, fileTooLarge{limit}
 	}
 	if err != nil {
 		return nil, invalidf("請選擇檔案（上限 " + humanSize(limit) + "）")
@@ -234,7 +236,7 @@ func readUpload(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, er
 		return nil, err
 	}
 	if int64(len(b)) > limit {
-		return nil, tooBig
+		return nil, fileTooLarge{limit}
 	}
 	return b, nil
 }

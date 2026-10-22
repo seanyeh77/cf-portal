@@ -19,20 +19,24 @@ export function useRecords() {
   });
 }
 
-export async function refreshRecords(fresh = false) {
+/** Refetches all data, except queries whose first key is in keep. */
+export async function refreshRecords(fresh = false, keep: string[] = []) {
   if (fresh) {
     const d = await api<RecordsData>('GET', '/api/records?fresh=1');
     queryClient.setQueryData(['records'], d);
   }
-  await queryClient.invalidateQueries();
+  await queryClient.invalidateQueries({ predicate: (q) => !keep.includes(String(q.queryKey[0])) });
 }
 
-/** Runs a mutation, then shows okMsg and refreshes all data; shows the error on failure. */
-export async function act(fn: () => Promise<unknown>, okMsg: string) {
+/**
+ * Runs a mutation, then shows okMsg and refreshes all data except the
+ * queries named in keep; shows the error on failure.
+ */
+export async function act(fn: () => Promise<unknown>, okMsg: string, keep?: string[]) {
   try {
     await fn();
     toast(okMsg);
-    await refreshRecords();
+    await refreshRecords(false, keep);
   } catch (e) {
     toast(errMsg(e), { error: true });
   }

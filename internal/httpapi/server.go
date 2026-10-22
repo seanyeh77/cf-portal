@@ -183,6 +183,8 @@ func writeAnyErr(w http.ResponseWriter, err error) {
 	var cfe *cloudflare.Error
 	var tooBig *http.MaxBytesError
 	switch {
+	case errors.As(err, new(fileTooLarge)):
+		writeErr(w, http.StatusRequestEntityTooLarge, err.Error())
 	case errors.As(err, &tooBig):
 		writeErr(w, http.StatusRequestEntityTooLarge, "請求內容超過 "+humanSize(tooBig.Limit))
 	case errors.As(err, &ve):
