@@ -243,9 +243,10 @@ func (s *Server) createRecord(r *http.Request, in model.RecordInput, meta model.
 // updateRecord writes a validated DNS change and the new meta, audits both
 // as action and then queues the checks. The local meta is written first and
 // rolled back if the conflict check or Cloudflare rejects the change, so a
-// failure leaves nothing changed.
+// failure leaves nothing changed. The writes ignore client disconnects so
+// the sequence is never abandoned halfway.
 func (s *Server) updateRecord(r *http.Request, cur model.Record, in model.RecordInput, metaBefore, metaAfter model.Meta, action string) (*model.Record, bool, error) {
-	ctx := r.Context()
+	ctx := context.WithoutCancel(r.Context())
 	if err := s.checkConflict(ctx, in, cur.ID); err != nil {
 		return nil, false, err
 	}
@@ -258,9 +259,7 @@ func (s *Server) updateRecord(r *http.Request, cur model.Record, in model.Record
 	rec, err := s.CF.Update(ctx, cur.ID, in)
 	if err != nil {
 		if metaChanged {
-			if rerr := s.Store.PutMeta(ctx, cur.ID, metaBefore); rerr != nil {
-				log.Printf("roll back meta %s: %v", cur.Name, rerr)
-			}
+			s.rollbackMeta(r, cur, metaBefore, metaAfter)
 		}
 		return nil, false, err
 	}
@@ -276,6 +275,26 @@ func (s *Server) updateRecord(r *http.Request, cur model.Record, in model.Record
 		s.Health.CheckSoon(*l)
 	}
 	return rec, s.Scanner.ScanSoon(*rec), nil
+}
+
+// rollbackMeta restores metaBefore after Cloudflare rejected an update,
+// unless the meta changed again meanwhile. If the restore fails, the meta
+// change stays and is audited so the log matches the data.
+func (s *Server) rollbackMeta(r *http.Request, cur model.Record, metaBefore, metaAfter model.Meta) {
+	ctx := context.WithoutCancel(r.Context())
+	now, err := s.Store.Meta(ctx, cur.ID)
+	now.UpdatedAt = metaAfter.UpdatedAt // set by the store, not part of the value
+	if err == nil && now != metaAfter {
+		return // changed by someone else since; leave their value
+	}
+	if err == nil {
+		err = s.Store.PutMeta(ctx, cur.ID, metaBefore)
+	}
+	if err != nil {
+		log.Printf("roll back meta %s: %v", cur.Name, err)
+		s.auditLog(r, "meta_update", cur.Name, map[string]any{"record_id": cur.ID, "meta_before": metaBefore, "meta_after": metaAfter,
+			"note": "DNS 更新失敗，管理資訊未能還原"})
+	}
 }
 
 // putMeta replaces a record's meta and audits the change as meta_update.
