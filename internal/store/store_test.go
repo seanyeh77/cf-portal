@@ -117,3 +117,19 @@ func TestRestoreMetaOnlyIfUnchanged(t *testing.T) {
 		t.Fatalf("row for b kept: %v", all)
 	}
 }
+
+func TestAuditIndexesRecordID(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "p.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	s.AddAudit(ctx, "10.0.0.1", "record_update", "old.sdc.nycu.club", `{"record_id":"r1"}`)
+	s.AddAudit(ctx, "10.0.0.1", "login", "admin", `{}`)
+	// Found by id even though the record has been renamed since.
+	rows, err := s.AuditForRecord(ctx, "r1", "new.sdc.nycu.club")
+	if err != nil || len(rows) != 1 || rows[0].Target != "old.sdc.nycu.club" {
+		t.Fatalf("history by record id: %v %v", rows, err)
+	}
+}

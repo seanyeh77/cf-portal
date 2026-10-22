@@ -684,7 +684,7 @@ func (s *Store) CountRequests(ctx context.Context, ip string, since float64) (pe
 // AddAudit writes an audit row; detail's record_id (if any) is indexed.
 func (s *Store) AddAudit(ctx context.Context, ip, action, target, detail string) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO audit(ts, ip, action, target, detail, record_id)
-		VALUES(?,?,?,?,?, CASE WHEN json_valid(?4) THEN json_extract(?4,'$.record_id') END)`, now(), ip, action, target, detail)
+		VALUES(?1, ?2, ?3, ?4, ?5, CASE WHEN json_valid(?5) THEN json_extract(?5, '$.record_id') END)`, now(), ip, action, target, detail)
 	return err
 }
 
