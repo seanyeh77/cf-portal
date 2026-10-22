@@ -198,7 +198,7 @@ func (s *Store) SetSettings(ctx context.Context, kv map[string]string) error {
 
 // AllMeta returns meta keyed by record id.
 func (s *Store) AllMeta(ctx context.Context) (map[string]model.Meta, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT record_id, owner, purpose, notes, expires_at, auto_delete, no_scan, updated_at FROM record_meta")
+	rows, err := s.db.QueryContext(ctx, "SELECT record_id, owner, purpose, notes, expires_at, auto_delete, no_scan FROM record_meta")
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +207,7 @@ func (s *Store) AllMeta(ctx context.Context) (map[string]model.Meta, error) {
 	for rows.Next() {
 		var id string
 		var m model.Meta
-		if err := rows.Scan(&id, &m.Owner, &m.Purpose, &m.Notes, &m.ExpiresAt, &m.AutoDelete, &m.NoScan, &m.UpdatedAt); err != nil {
+		if err := rows.Scan(&id, &m.Owner, &m.Purpose, &m.Notes, &m.ExpiresAt, &m.AutoDelete, &m.NoScan); err != nil {
 			return nil, err
 		}
 		out[id] = m
@@ -215,28 +215,60 @@ func (s *Store) AllMeta(ctx context.Context) (map[string]model.Meta, error) {
 	return out, rows.Err()
 }
 
-// Meta returns one record's meta (zero value if absent).
-func (s *Store) Meta(ctx context.Context, id string) (model.Meta, error) {
+// querier is *sql.DB or *sql.Tx.
+type querier interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func readMeta(ctx context.Context, q querier, id string) (model.Meta, error) {
 	var m model.Meta
-	err := s.db.QueryRowContext(ctx, "SELECT owner, purpose, notes, expires_at, auto_delete, no_scan, updated_at FROM record_meta WHERE record_id=?", id).
-		Scan(&m.Owner, &m.Purpose, &m.Notes, &m.ExpiresAt, &m.AutoDelete, &m.NoScan, &m.UpdatedAt)
+	err := q.QueryRowContext(ctx, "SELECT owner, purpose, notes, expires_at, auto_delete, no_scan FROM record_meta WHERE record_id=?", id).
+		Scan(&m.Owner, &m.Purpose, &m.Notes, &m.ExpiresAt, &m.AutoDelete, &m.NoScan)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.Meta{}, nil
 	}
 	return m, err
 }
 
-// PutMeta replaces one record's meta. Empty meta deletes the row.
-func (s *Store) PutMeta(ctx context.Context, id string, m model.Meta) error {
+func writeMeta(ctx context.Context, q querier, id string, m model.Meta) error {
 	if m.IsZero() {
-		_, err := s.db.ExecContext(ctx, "DELETE FROM record_meta WHERE record_id=?", id)
+		_, err := q.ExecContext(ctx, "DELETE FROM record_meta WHERE record_id=?", id)
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO record_meta(record_id, owner, purpose, notes, expires_at, auto_delete, no_scan, updated_at)
+	_, err := q.ExecContext(ctx, `INSERT INTO record_meta(record_id, owner, purpose, notes, expires_at, auto_delete, no_scan, updated_at)
 		VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(record_id) DO UPDATE SET owner=excluded.owner, purpose=excluded.purpose, notes=excluded.notes,
 		expires_at=excluded.expires_at, auto_delete=excluded.auto_delete, no_scan=excluded.no_scan, updated_at=excluded.updated_at`,
 		id, m.Owner, m.Purpose, m.Notes, m.ExpiresAt, b2i(m.AutoDelete), b2i(m.NoScan), now())
 	return err
+}
+
+// Meta returns one record's meta (zero value if absent).
+func (s *Store) Meta(ctx context.Context, id string) (model.Meta, error) {
+	return readMeta(ctx, s.db, id)
+}
+
+// PutMeta replaces one record's meta. Empty meta deletes the row.
+func (s *Store) PutMeta(ctx context.Context, id string, m model.Meta) error {
+	return writeMeta(ctx, s.db, id, m)
+}
+
+// RestoreMeta sets a record's meta to restore only if it still equals
+// expect, in one transaction. It reports whether the meta was restored.
+func (s *Store) RestoreMeta(ctx context.Context, id string, expect, restore model.Meta) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	cur, err := readMeta(ctx, tx, id)
+	if err != nil || cur != expect {
+		return false, err
+	}
+	if err := writeMeta(ctx, tx, id, restore); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
 }
 
 // ForgetRecord deletes all local data about a deleted record and returns

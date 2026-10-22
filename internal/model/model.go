@@ -35,13 +35,12 @@ func (r Record) Input() RecordInput {
 
 // Meta is management information kept only in this system.
 type Meta struct {
-	Owner      string  `json:"owner"`
-	Purpose    string  `json:"purpose"`
-	Notes      string  `json:"notes"`
-	ExpiresAt  string  `json:"expires_at"`
-	AutoDelete bool    `json:"auto_delete"`
-	NoScan     bool    `json:"no_scan"`
-	UpdatedAt  float64 `json:"-"`
+	Owner      string `json:"owner"`
+	Purpose    string `json:"purpose"`
+	Notes      string `json:"notes"`
+	ExpiresAt  string `json:"expires_at"`
+	AutoDelete bool   `json:"auto_delete"`
+	NoScan     bool   `json:"no_scan"`
 }
 
 // MetaPatch carries optional meta fields; nil means unchanged.

@@ -84,3 +84,35 @@ func TestPruneScansKeepsNewerRows(t *testing.T) {
 		t.Fatalf("after prune: %v", scans)
 	}
 }
+
+func TestRestoreMetaOnlyIfUnchanged(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "p.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	old, written := model.Meta{Owner: "old"}, model.Meta{Owner: "new"}
+	s.PutMeta(ctx, "a", written)
+	if ok, err := s.RestoreMeta(ctx, "a", written, old); !ok || err != nil {
+		t.Fatalf("restore of unchanged meta: %v %v", ok, err)
+	}
+	if m, _ := s.Meta(ctx, "a"); m != old {
+		t.Fatalf("not restored: %+v", m)
+	}
+	s.PutMeta(ctx, "a", model.Meta{Owner: "someone else"})
+	if ok, _ := s.RestoreMeta(ctx, "a", written, old); ok {
+		t.Fatal("restored over a concurrent change")
+	}
+	if m, _ := s.Meta(ctx, "a"); m.Owner != "someone else" {
+		t.Fatalf("concurrent change overwritten: %+v", m)
+	}
+	// Restoring to empty meta deletes the row.
+	s.PutMeta(ctx, "b", written)
+	if ok, _ := s.RestoreMeta(ctx, "b", written, model.Meta{}); !ok {
+		t.Fatal("restore to empty")
+	}
+	if all, _ := s.AllMeta(ctx); len(all) != 1 {
+		t.Fatalf("row for b kept: %v", all)
+	}
+}

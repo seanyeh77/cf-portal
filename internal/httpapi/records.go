@@ -209,7 +209,10 @@ func (s *Server) prepareCreate(in model.RecordInput, meta model.Meta) (model.Rec
 // commitCreate creates a prepared record, stores its meta and audits it.
 // The caller queues the connection check once all writes are done.
 func (s *Server) commitCreate(r *http.Request, in model.RecordInput, meta model.Meta, action string, extra map[string]any) (*model.Record, error) {
-	ctx := r.Context()
+	ctx, err := writeContext(r)
+	if err != nil {
+		return nil, err
+	}
 	rec, err := s.CF.Create(ctx, in)
 	if err != nil {
 		return nil, err
@@ -242,12 +245,15 @@ func (s *Server) createRecord(r *http.Request, in model.RecordInput, meta model.
 
 // updateRecord writes a validated DNS change and the new meta, audits both
 // as action and then queues the checks. The local meta is written first and
-// rolled back if the conflict check or Cloudflare rejects the change, so a
-// failure leaves nothing changed. The writes ignore client disconnects so
-// the sequence is never abandoned halfway.
+// rolled back if Cloudflare rejects the change, so a failure leaves nothing
+// changed. Once writing starts, client disconnects are ignored so the
+// sequence is never abandoned halfway.
 func (s *Server) updateRecord(r *http.Request, cur model.Record, in model.RecordInput, metaBefore, metaAfter model.Meta, action string) (*model.Record, bool, error) {
-	ctx := context.WithoutCancel(r.Context())
-	if err := s.checkConflict(ctx, in, cur.ID); err != nil {
+	if err := s.checkConflict(r.Context(), in, cur.ID); err != nil {
+		return nil, false, err
+	}
+	ctx, err := writeContext(r)
+	if err != nil {
 		return nil, false, err
 	}
 	metaChanged := metaAfter != metaBefore
@@ -259,7 +265,7 @@ func (s *Server) updateRecord(r *http.Request, cur model.Record, in model.Record
 	rec, err := s.CF.Update(ctx, cur.ID, in)
 	if err != nil {
 		if metaChanged {
-			s.rollbackMeta(r, cur, metaBefore, metaAfter)
+			s.rollbackMeta(ctx, r, cur, metaBefore, metaAfter)
 		}
 		return nil, false, err
 	}
@@ -280,21 +286,28 @@ func (s *Server) updateRecord(r *http.Request, cur model.Record, in model.Record
 // rollbackMeta restores metaBefore after Cloudflare rejected an update,
 // unless the meta changed again meanwhile. If the restore fails, the meta
 // change stays and is audited so the log matches the data.
-func (s *Server) rollbackMeta(r *http.Request, cur model.Record, metaBefore, metaAfter model.Meta) {
-	ctx := context.WithoutCancel(r.Context())
-	now, err := s.Store.Meta(ctx, cur.ID)
-	now.UpdatedAt = metaAfter.UpdatedAt // set by the store, not part of the value
-	if err == nil && now != metaAfter {
-		return // changed by someone else since; leave their value
-	}
-	if err == nil {
-		err = s.Store.PutMeta(ctx, cur.ID, metaBefore)
-	}
-	if err != nil {
+func (s *Server) rollbackMeta(ctx context.Context, r *http.Request, cur model.Record, metaBefore, metaAfter model.Meta) {
+	if _, err := s.Store.RestoreMeta(ctx, cur.ID, metaAfter, metaBefore); err != nil {
 		log.Printf("roll back meta %s: %v", cur.Name, err)
-		s.auditLog(r, "meta_update", cur.Name, map[string]any{"record_id": cur.ID, "meta_before": metaBefore, "meta_after": metaAfter,
-			"note": "DNS 更新失敗，管理資訊未能還原"})
+		s.auditMeta(r, cur, metaBefore, metaAfter, map[string]any{"note": "DNS 更新失敗，管理資訊未能還原"})
 	}
+}
+
+// writeContext returns the context for a multi-step write: the request must
+// still be live when writing starts, but a disconnect afterwards must not
+// abandon the sequence halfway. Outbound calls keep their own timeouts.
+func writeContext(r *http.Request) (context.Context, error) {
+	if err := r.Context().Err(); err != nil {
+		return nil, err
+	}
+	return context.WithoutCancel(r.Context()), nil
+}
+
+// auditMeta writes a meta_update audit entry.
+func (s *Server) auditMeta(r *http.Request, rec model.Record, before, after model.Meta, extra map[string]any) {
+	d := map[string]any{"record_id": rec.ID, "meta_before": before, "meta_after": after}
+	maps.Copy(d, extra)
+	s.auditLog(r, "meta_update", rec.Name, d)
 }
 
 // putMeta replaces a record's meta and audits the change as meta_update.
@@ -305,9 +318,7 @@ func (s *Server) putMeta(r *http.Request, rec model.Record, before, after model.
 	if err := s.Store.PutMeta(r.Context(), rec.ID, after); err != nil {
 		return err
 	}
-	d := map[string]any{"record_id": rec.ID, "meta_before": before, "meta_after": after}
-	maps.Copy(d, extra)
-	s.auditLog(r, "meta_update", rec.Name, d)
+	s.auditMeta(r, rec, before, after, extra)
 	return nil
 }
 
