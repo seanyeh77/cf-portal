@@ -24,7 +24,7 @@ export const ACTION_LABEL: Record<string, string> = {
   request_reject: '駁回申請',
 };
 
-export type Detail = {
+type Detail = {
   record_id?: string;
   before?: RecordInput;
   after?: RecordInput;
@@ -34,7 +34,7 @@ export type Detail = {
   [k: string]: unknown;
 };
 
-export function parseDetail(e: AuditEntry): Detail {
+function parseDetail(e: AuditEntry): Detail {
   try {
     return JSON.parse(e.detail || '{}');
   } catch {

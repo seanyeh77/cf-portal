@@ -47,7 +47,6 @@ export type PortalInit = {
   portal: {
     site: Site;
     categories: { name: string; count: number }[];
-    featured: string[];
     services: Service[];
     status: Record<string, Summary>;
     now: number;
@@ -106,8 +105,7 @@ const Card = memo(function Card({
   index: number;
 }) {
   const last = sum?.last;
-  const state = !last ? '尚未檢查' : last.ok ? '正常' : '無回應';
-  const stCls = !last ? 'none' : last.ok ? 'ok' : 'down';
+  const [state, stCls, dotCls] = !last ? ['尚未檢查', 'none', 'none'] : last.ok ? ['正常', 'ok', 'ok'] : ['無回應', 'down', 'down-warn'];
   const first = [...s.title][0] ?? '?';
   const style = { '--cat': color } as CSSProperties;
   return (
@@ -142,7 +140,7 @@ const Card = memo(function Card({
       <StatusBar sum={sum} />
       <div className="card-status">
         <span className={'st ' + stCls}>
-          <span className={'dot ' + (stCls === 'ok' ? 'ok' : stCls === 'down' ? 'down-warn' : 'none')} />
+          <span className={'dot ' + dotCls} />
           {state}
         </span>
         {last?.ok && <span>{last.ms} ms</span>}

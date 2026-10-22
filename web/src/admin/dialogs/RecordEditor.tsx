@@ -122,7 +122,7 @@ export function RecordEditor({ record, data, focus }: { record?: DNSRecord; data
     if (record) {
       const before: DNSForm = { type: record.type, name: normTarget(record.name), content: record.content, ttl: record.ttl, proxied: record.proxied };
       const changes = CONFIRM_FIELDS.filter((k) =>
-        k === 'name' ? before.name !== form.name : k === 'content' ? normTarget(String(before.content)) !== normTarget(form.content) : before[k] !== form[k],
+        k === 'name' ? before.name !== form.name : k === 'content' ? normTarget(before.content) !== normTarget(form.content) : before[k] !== form[k],
       );
       if (changes.length > 0) {
         const reasons: string[] = [];

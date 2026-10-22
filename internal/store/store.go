@@ -83,7 +83,16 @@ var columns = map[string][][2]string{
 	"record_scan": {{"last_ok_ts", "REAL"}, {"open_ports", "TEXT NOT NULL DEFAULT ''"}, {"detail", "TEXT NOT NULL DEFAULT ''"},
 		{"dns_status", "TEXT NOT NULL DEFAULT ''"}, {"dns_detail", "TEXT NOT NULL DEFAULT ''"}},
 	"requests": {{"expires_at", "TEXT DEFAULT ''"}, {"admin_note", "TEXT NOT NULL DEFAULT ''"}, {"decided_ts", "REAL"}, {"record_id", "TEXT"}},
+	"audit":    {{"record_id", "TEXT"}},
 }
+
+// postMigrate runs after columns exist: indexes on migrated columns and
+// backfills. Every statement is idempotent.
+const postMigrate = `
+UPDATE audit SET record_id=json_extract(detail,'$.record_id') WHERE record_id IS NULL AND json_valid(detail);
+CREATE INDEX IF NOT EXISTS audit_record ON audit(record_id);
+CREATE INDEX IF NOT EXISTS audit_target ON audit(lower(target));
+`
 
 // Open opens (and migrates) the database at path.
 func Open(path string) (*Store, error) {
@@ -131,6 +140,9 @@ func (s *Store) migrate() error {
 			}
 		}
 	}
+	if _, err := s.db.Exec(postMigrate); err != nil {
+		return fmt.Errorf("migrate indexes: %w", err)
+	}
 	return nil
 }
 
@@ -141,13 +153,6 @@ func (s *Store) Close() error { return s.db.Close() }
 func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
 
 func now() float64 { return float64(time.Now().UnixNano()) / 1e9 }
-
-func b2i(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
-}
 
 // ---- settings ----
 
@@ -252,7 +257,7 @@ func writeMeta(ctx context.Context, q querier, id string, m model.Meta) error {
 	_, err := q.ExecContext(ctx, `INSERT INTO record_meta(record_id, owner, purpose, notes, expires_at, auto_delete, no_scan, updated_at)
 		VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(record_id) DO UPDATE SET owner=excluded.owner, purpose=excluded.purpose, notes=excluded.notes,
 		expires_at=excluded.expires_at, auto_delete=excluded.auto_delete, no_scan=excluded.no_scan, updated_at=excluded.updated_at`,
-		id, m.Owner, m.Purpose, m.Notes, m.ExpiresAt, b2i(m.AutoDelete), b2i(m.NoScan), now())
+		id, m.Owner, m.Purpose, m.Notes, m.ExpiresAt, m.AutoDelete, m.NoScan, now())
 	return err
 }
 
@@ -341,7 +346,7 @@ func (s *Store) PutScan(ctx context.Context, id string, ts float64, reachable bo
 		VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(record_id) DO UPDATE SET last_ts=excluded.last_ts,
 		last_ok_ts=COALESCE(excluded.last_ok_ts, record_scan.last_ok_ts), reachable=excluded.reachable, open_ports=excluded.open_ports,
 		detail=excluded.detail, dns_status=excluded.dns_status, dns_detail=excluded.dns_detail`,
-		id, ts, ts, lastOK, b2i(reachable), ports, detail, dnsStatus, dnsDetail)
+		id, ts, ts, lastOK, reachable, ports, detail, dnsStatus, dnsDetail)
 	return err
 }
 
@@ -452,7 +457,7 @@ func (s *Store) PutListing(ctx context.Context, l model.Listing) error {
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(record_id) DO UPDATE SET hostname=excluded.hostname, title=excluded.title,
 		description=excluded.description, category=excluded.category, url=excluded.url, sort_order=excluded.sort_order,
 		featured=excluded.featured, tags=excluded.tags, icon=excluded.icon, icon_file=excluded.icon_file, updated_at=excluded.updated_at`,
-		l.RecordID, l.Hostname, l.Title, l.Description, l.Category, l.URL, l.SortOrder, b2i(l.Featured), l.Tags, l.Icon, l.IconFile, t, t)
+		l.RecordID, l.Hostname, l.Title, l.Description, l.Category, l.URL, l.SortOrder, l.Featured, l.Tags, l.Icon, l.IconFile, t, t)
 	return err
 }
 
@@ -504,7 +509,7 @@ func (s *Store) AddChecks(ctx context.Context, checks []Check, pruneBefore float
 	}
 	defer tx.Rollback()
 	for _, c := range checks {
-		if _, err := tx.ExecContext(ctx, "INSERT INTO checks(record_id, ts, ok, ms, status) VALUES(?,?,?,?,?)", c.RecordID, c.TS, b2i(c.OK), c.MS, c.Status); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO checks(record_id, ts, ok, ms, status) VALUES(?,?,?,?,?)", c.RecordID, c.TS, c.OK, c.MS, c.Status); err != nil {
 			return err
 		}
 	}
@@ -514,23 +519,70 @@ func (s *Store) AddChecks(ctx context.Context, checks []Check, pruneBefore float
 	return tx.Commit()
 }
 
-// ChecksSince returns checks since ts, grouped by record id, oldest first.
-func (s *Store) ChecksSince(ctx context.Context, ts float64) (map[string][]Check, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT record_id, ts, ok, ms, status FROM checks WHERE ts>=? ORDER BY ts", ts)
+// CheckStat aggregates one record's recent checks.
+type CheckStat struct {
+	// Buckets maps a bucket index (0 = the bucket starting at bucketStart)
+	// to {ok, total}.
+	Buckets       map[int][2]int
+	UpOK, UpTotal int // checks since day0
+	Last          *Check
+}
+
+// CheckStats aggregates checks per record in SQL: per-bucket counts from
+// bucketStart in buckets of bucketSec, totals since day0, and the latest
+// check. Only aggregates leave the database.
+func (s *Store) CheckStats(ctx context.Context, bucketStart, bucketSec, day0 float64) (map[string]*CheckStat, error) {
+	out := map[string]*CheckStat{}
+	get := func(id string) *CheckStat {
+		if out[id] == nil {
+			out[id] = &CheckStat{Buckets: map[int][2]int{}}
+		}
+		return out[id]
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT record_id, CAST((ts-?)/? AS INTEGER) AS b, SUM(ok), COUNT(*)
+		FROM checks WHERE ts>=? GROUP BY record_id, b`, bucketStart, bucketSec, bucketStart)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var id string
+		var b, ok, n int
+		if err := rows.Scan(&id, &b, &ok, &n); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		get(id).Buckets[b] = [2]int{ok, n}
+	}
+	rows.Close()
+	rows, err = s.db.QueryContext(ctx, "SELECT record_id, SUM(ok), COUNT(*) FROM checks WHERE ts>=? GROUP BY record_id", day0)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var id string
+		var ok, n int
+		if err := rows.Scan(&id, &ok, &n); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		st := get(id)
+		st.UpOK, st.UpTotal = ok, n
+	}
+	rows.Close()
+	// SQLite returns the other columns from the row holding MAX(ts).
+	rows, err = s.db.QueryContext(ctx, "SELECT record_id, MAX(ts), ok, ms, status FROM checks GROUP BY record_id")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := map[string][]Check{}
 	for rows.Next() {
-		var id string
-		var c Check
+		c := Check{}
 		var st sql.NullInt64
-		if err := rows.Scan(&id, &c.TS, &c.OK, &c.MS, &st); err != nil {
+		if err := rows.Scan(&c.RecordID, &c.TS, &c.OK, &c.MS, &st); err != nil {
 			return nil, err
 		}
 		c.Status = int(st.Int64)
-		out[id] = append(out[id], c)
+		get(c.RecordID).Last = &c
 	}
 	return out, rows.Err()
 }
@@ -629,9 +681,10 @@ func (s *Store) CountRequests(ctx context.Context, ip string, since float64) (pe
 
 // ---- audit ----
 
-// AddAudit writes an audit row.
+// AddAudit writes an audit row; detail's record_id (if any) is indexed.
 func (s *Store) AddAudit(ctx context.Context, ip, action, target, detail string) error {
-	_, err := s.db.ExecContext(ctx, "INSERT INTO audit(ts, ip, action, target, detail) VALUES(?,?,?,?,?)", now(), ip, action, target, detail)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO audit(ts, ip, action, target, detail, record_id)
+		VALUES(?,?,?,?,?, CASE WHEN json_valid(?4) THEN json_extract(?4,'$.record_id') END)`, now(), ip, action, target, detail)
 	return err
 }
 
@@ -659,6 +712,7 @@ func (s *Store) Audit(ctx context.Context, n int) ([]model.AuditEntry, error) {
 
 // AuditForRecord returns audit rows about one record id or name.
 func (s *Store) AuditForRecord(ctx context.Context, id, name string) ([]model.AuditEntry, error) {
-	return s.audit(ctx, `WHERE (json_valid(detail) AND json_extract(detail,'$.record_id')=?) OR (target<>'' AND lower(target)=lower(?))
+	// Two indexed lookups instead of an OR that scans and parses every row.
+	return s.audit(ctx, `WHERE id IN (SELECT id FROM audit WHERE record_id=? UNION SELECT id FROM audit WHERE target<>'' AND lower(target)=lower(?))
 		ORDER BY id DESC LIMIT 100`, id, strings.TrimSuffix(name, "."))
 }

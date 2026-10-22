@@ -271,9 +271,6 @@ func TestNoOwnerNameRuleShared(t *testing.T) {
 	if !has(r, "4", "shared_target") {
 		t.Error("CNAME targets compare case-insensitively")
 	}
-	if len(r.Targets["10.0.1.21"]) != 2 || len(r.Targets["a.example.com"]) != 2 {
-		t.Errorf("targets: %v", r.Targets)
-	}
 	fx.set.NameRule = `[a-z]+`
 	fx.recs = append(fx.recs, rec("6", "A", "hpc-x", "1.2.3.4"))
 	if r := fx.run(); !has(r, "6", "name_rule") || has(r, "2", "name_rule") {

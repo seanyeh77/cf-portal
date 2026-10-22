@@ -121,7 +121,6 @@ type Result struct {
 	Records map[string]*RecordResult
 	Summary map[string]int
 	Groups  [][2]any
-	Targets map[string][]string
 }
 
 func newIssue(kind, detail string) Issue {
@@ -194,10 +193,8 @@ func Analyze(in Input) *Result {
 	}
 	targets := map[string][]string{}
 	for _, r := range in.Records {
-		if r.Type == "A" || r.Type == "AAAA" || r.Type == "CNAME" {
-			if k := TargetKey(r); k != "" {
-				targets[k] = append(targets[k], r.ID)
-			}
+		if k := TargetKey(r); k != "" {
+			targets[k] = append(targets[k], r.ID)
 		}
 	}
 
@@ -287,10 +284,9 @@ func Analyze(in Input) *Result {
 				}
 			}
 		}
-		if r.Type == "A" || r.Type == "AAAA" || r.Type == "CNAME" {
-			if k := TargetKey(r); len(targets[k]) >= 2 {
-				add(r.ID, "shared_target", fmt.Sprintf("%d 筆指向 %s", len(targets[k]), k))
-			}
+		// TargetKey is "" for other types, and "" is never collected.
+		if k := TargetKey(r); len(targets[k]) >= 2 {
+			add(r.ID, "shared_target", fmt.Sprintf("%d 筆指向 %s", len(targets[k]), k))
 		}
 	}
 
@@ -356,7 +352,7 @@ func Analyze(in Input) *Result {
 		raw[id] = append(raw[id], is)
 	}
 
-	res := &Result{Records: map[string]*RecordResult{}, Summary: map[string]int{}, Targets: map[string][]string{}}
+	res := &Result{Records: map[string]*RecordResult{}, Summary: map[string]int{}}
 	groupCount := map[string]int{}
 	for _, r := range in.Records {
 		issues := raw[r.ID]
@@ -389,11 +385,6 @@ func Analyze(in Input) *Result {
 	sort.Slice(res.Groups, func(i, j int) bool { return res.Groups[i][0].(string) < res.Groups[j][0].(string) })
 	if res.Groups == nil {
 		res.Groups = [][2]any{}
-	}
-	for k, ids := range targets {
-		if len(ids) >= 2 {
-			res.Targets[k] = ids
-		}
 	}
 	return res
 }

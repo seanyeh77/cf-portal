@@ -13,6 +13,7 @@ import (
 	"github.com/nycu-sdc/sdc-portal/internal/analysis"
 	"github.com/nycu-sdc/sdc-portal/internal/assets"
 	"github.com/nycu-sdc/sdc-portal/internal/dnsrec"
+	"github.com/nycu-sdc/sdc-portal/internal/loop"
 	"github.com/nycu-sdc/sdc-portal/internal/model"
 	"github.com/nycu-sdc/sdc-portal/internal/store"
 )
@@ -137,7 +138,7 @@ func (s *Server) apiRecords(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"zone": s.Cfg.CFZoneName, "today": s.today(), "synced_at": float64(z.SyncedAt.Unix()), "now": float64(s.Now().Unix()),
 		"records": out, "orphans": orphans, "summary": z.Analysis.Summary,
-		"kinds": analysis.Kinds, "groups": z.Analysis.Groups, "targets": z.Analysis.Targets,
+		"kinds": analysis.Kinds, "groups": z.Analysis.Groups,
 		"scan": s.Scanner.Status(), "pending_requests": pending, "last_snapshot": lastSnap,
 		"settings": map[string]string{"zombie_days": set["zombie_days"], "expiry_warn_days": set["expiry_warn_days"], "scan_ports": set["scan_ports"],
 			"name_rule_hint": set["name_rule_hint"], "name_rule": set["name_rule"], "requests_enabled": set["requests_enabled"]},
@@ -209,9 +210,13 @@ func (s *Server) commitCreate(r *http.Request, in model.RecordInput, meta model.
 }
 
 // createRecord prepares, conflict-checks, commits and queues a connection
-// check for one record, reporting whether a check was queued.
-func (s *Server) createRecord(r *http.Request, in model.RecordInput, meta model.Meta, action string, extra map[string]any) (*model.Record, bool, error) {
+// check for one record, reporting whether a check was queued. newName
+// applies the naming rule; restores pass false to bring back old names.
+func (s *Server) createRecord(r *http.Request, in model.RecordInput, meta model.Meta, newName bool, action string, extra map[string]any) (*model.Record, bool, error) {
 	in, meta, err := s.prepareCreate(in, meta)
+	if err == nil && newName {
+		err = s.checkNameRule(r.Context(), in.Name)
+	}
 	if err == nil {
 		err = s.checkConflict(r.Context(), in, "")
 	}
@@ -335,10 +340,11 @@ type recordBody struct {
 	Meta model.Meta `json:"meta"`
 }
 
-// checkNameRule refuses names that break the naming rule. It applies to
-// new names only; existing (and restored) names may keep breaking it.
+// checkNameRule refuses a (validated) name that breaks the naming rule. It
+// applies to new names only; existing and restored names may keep breaking
+// it, and batch imports only warn.
 func (s *Server) checkNameRule(ctx context.Context, name string) error {
-	if msg := dnsrec.NameRuleError(dnsrec.NormalizeName(name, s.Cfg.CFZoneName), s.Cfg.CFZoneName, s.settings(ctx)["name_rule"]); msg != "" {
+	if msg := dnsrec.NameRuleError(name, s.Cfg.CFZoneName, s.settings(ctx)["name_rule"]); msg != "" {
 		return invalidf("名稱格式不符：" + msg)
 	}
 	return nil
@@ -349,11 +355,7 @@ func (s *Server) apiCreateRecord(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &b) {
 		return
 	}
-	if err := s.checkNameRule(r.Context(), b.Name); err != nil {
-		writeAnyErr(w, err)
-		return
-	}
-	rec, scanning, err := s.createRecord(r, b.RecordInput, b.Meta, "record_create", nil)
+	rec, scanning, err := s.createRecord(r, b.RecordInput, b.Meta, true, "record_create", nil)
 	if err != nil {
 		writeAnyErr(w, err)
 		return
@@ -641,17 +643,15 @@ func (s *Server) apiBulkDelete(w http.ResponseWriter, r *http.Request) {
 		byID[rec.ID] = rec
 	}
 	results := make([]itemResult, len(b.IDs))
-	forEachCF(len(b.IDs), func(i int) {
+	loop.ForEach(len(b.IDs), cfWorkers, func(i int) {
 		id := b.IDs[i]
 		rec, ok := byID[id]
-		switch {
-		case !ok:
+		if !ok {
 			results[i] = itemResult{ID: id, Name: id, Error: "record 已不存在"}
-		default:
+		} else if err := s.deleteRecord(r, rec, "record_delete"); err != nil {
+			results[i] = itemResult{ID: id, Name: rec.Name, Error: err.Error()}
+		} else {
 			results[i] = itemResult{ID: id, Name: rec.Name, OK: true}
-			if err := s.deleteRecord(r, rec, "record_delete"); err != nil {
-				results[i] = itemResult{ID: id, Name: rec.Name, Error: err.Error()}
-			}
 		}
 	})
 	okN := 0

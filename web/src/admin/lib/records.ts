@@ -1,7 +1,7 @@
 import { dayDiff, fmtDateTimeShort, relTime } from '../../shared/format';
 import type { DNSRecord, Issue, Level, RecordsData } from '../types';
 
-export const LEVEL_RANK: Record<string, number> = { high: 0, medium: 1, low: 2, info: 3 };
+const LEVEL_RANK: Record<string, number> = { high: 0, medium: 1, low: 2, info: 3 };
 export const LEVEL_NAME: Record<Level, string> = { high: '緊急', medium: '注意', low: '建議', info: '參考' };
 export const PREFIX: Partial<Record<Level, string>> = { high: '緊急：', medium: '注意：' };
 
@@ -13,8 +13,6 @@ export const EXPIRY_KINDS = new Set(['expired', 'expiring']);
 /** Issues the status column leaves to other columns. */
 const HIDDEN_IN_STATUS = new Set(['no_owner', 'expired', 'expiring']);
 
-/** The row level computed by the server. */
-export const rowLevel = (r: DNSRecord) => r.level;
 
 /** Issues shown in the status column, most severe first. */
 export function statusIssues(r: DNSRecord): Issue[] {
@@ -36,7 +34,7 @@ export function normTarget(s: string) {
   return s.trim().toLowerCase().replace(/\.$/, '');
 }
 
-export function isPrivateIP(s: string) {
+function isPrivateIP(s: string) {
   const v4 = s.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
   if (v4) {
     const [a, b] = [+v4[1], +v4[2]];
@@ -46,7 +44,7 @@ export function isPrivateIP(s: string) {
   return /^f[cd]/.test(l) || l.startsWith('fe80');
 }
 
-export function isLocalIP(s: string) {
+function isLocalIP(s: string) {
   return /^127\./.test(s) || s === '0.0.0.0' || s === '::1' || s === '::';
 }
 
@@ -159,7 +157,7 @@ function nameKey(r: DNSRecord, zone: string) {
 }
 
 function severityScore(r: DNSRecord) {
-  const lv = rowLevel(r);
+  const lv = r.level;
   const rank = lv ? LEVEL_RANK[lv] : 4;
   const unreachable = r.scan && r.scan.last_ts && !r.scan.reachable && !r.meta.no_scan ? 0 : 1;
   return rank * 2 + unreachable;
@@ -260,7 +258,10 @@ export function fieldValue(field: string, v: unknown) {
   return String(v);
 }
 
-/** Distinct owners, for owner field suggestions. */
-export function ownersOf(records: DNSRecord[]) {
-  return Array.from(new Set(records.map((r) => r.meta.owner).filter(Boolean))).sort();
+/** Distinct non-empty values of pick, sorted. */
+export function distinctOf(records: DNSRecord[], pick: (r: DNSRecord) => string | undefined) {
+  return Array.from(new Set(records.map(pick).filter((v): v is string => !!v))).sort();
 }
+
+/** Distinct owners, for owner field suggestions. */
+export const ownersOf = (records: DNSRecord[]) => distinctOf(records, (r) => r.meta.owner);

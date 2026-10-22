@@ -151,7 +151,7 @@ export function RecordDrawer({ r, data }: { r: DNSRecord; data: RecordsData }) {
       <section className="dsec">
         <h3>
           管理資訊
-          <button type="button" className="linkbtn small" disabled={!r.editable} onClick={() => (r.editable ? openEditor(r.id, 'owner') : null)}>
+          <button type="button" className="linkbtn small" disabled={!r.editable} onClick={() => openEditor(r.id, 'owner')}>
             編輯
           </button>
         </h3>

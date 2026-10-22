@@ -15,11 +15,11 @@ import {
   LEVEL_NAME,
   matches,
   PREFIX,
-  rowLevel,
   sortRecords,
   statusIssues,
   sub,
   syncedTip,
+  distinctOf,
   type Filters,
   type SortKey,
 } from '../lib/records';
@@ -172,7 +172,7 @@ const Row = memo(function Row({
   pending: boolean;
   showExpiry: boolean;
 }) {
-  const lv = rowLevel(r);
+  const lv = r.level;
   const s = sub(r.name, zone);
   const unassigned = !r.meta.owner.trim();
   const metaLine = [r.meta.purpose, r.meta.owner].filter(Boolean).join(' · ');
@@ -283,19 +283,19 @@ function RecordsView({ data }: { data: RecordsData }) {
   const zone = data.zone;
 
   const base = useMemo(() => data.records.filter((r) => matches(r, f)), [data, f]);
-  const filtered = useMemo(() => base.filter((r) => !f.severity || rowLevel(r) === f.severity), [base, f.severity]);
+  const filtered = useMemo(() => base.filter((r) => !f.severity || r.level === f.severity), [base, f.severity]);
   const sorted = useMemo(() => sortRecords(filtered, view.sort, zone), [filtered, view.sort, zone]);
   const counts = useMemo(() => {
     const c = { all: base.length, high: 0, medium: 0, low: 0 };
     for (const r of base) {
-      const lv = rowLevel(r);
+      const lv = r.level;
       if (lv === 'high' || lv === 'medium' || lv === 'low') c[lv]++;
     }
     return c;
   }, [base]);
   const showExpiry = filtered.some((r) => r.meta.expires_at);
   const unassigned = data.records.filter((r) => hasIssue(r, 'no_owner'));
-  const types = Array.from(new Set(data.records.map((r) => r.type))).sort();
+  const types = useMemo(() => distinctOf(data.records, (r) => r.type), [data.records]);
   const desc = describeFilters(f, data);
   const anyFilter = desc.length > 0;
   const allIds = useMemo(() => new Set(data.records.map((r) => r.id)), [data.records]);
@@ -314,20 +314,27 @@ function RecordsView({ data }: { data: RecordsData }) {
   const setF = (p: Partial<Filters>) => setFilters(p);
   const cols = showExpiry ? 7 : 6;
 
+  // Targets shared by two or more records (any filter), for grouping.
+  const targetCounts = useMemo(() => {
+    const n = new Map<string, number>();
+    data.records.forEach((r) => r.target_key && n.set(r.target_key, (n.get(r.target_key) ?? 0) + 1));
+    return n;
+  }, [data.records]);
+
   const groups = useMemo(() => {
     if (!view.byTarget) return null;
     const by = new Map<string, DNSRecord[]>();
     const other: DNSRecord[] = [];
     for (const r of sorted) {
       const k = r.target_key;
-      if (k && data.targets[k]) {
+      if (k && (targetCounts.get(k) ?? 0) >= 2) {
         if (!by.has(k)) by.set(k, []);
         by.get(k)!.push(r);
       } else other.push(r);
     }
     const out = Array.from(by.entries()).sort((a, b) => a[0].localeCompare(b[0]));
     return { out, other };
-  }, [view.byTarget, sorted, data.targets]);
+  }, [view.byTarget, sorted, targetCounts]);
 
   const renderRow = (r: DNSRecord) => (
     <Row
@@ -393,9 +400,9 @@ function RecordsView({ data }: { data: RecordsData }) {
           {(
             [
               ['', '全部', counts.all],
-              ['high', '緊急', counts.high],
-              ['medium', '注意', counts.medium],
-              ['low', '建議', counts.low],
+              ['high', LEVEL_NAME.high, counts.high],
+              ['medium', LEVEL_NAME.medium, counts.medium],
+              ['low', LEVEL_NAME.low, counts.low],
             ] as const
           ).map(([k, label, n], i) => (
             <Fragment key={k}>
@@ -598,7 +605,7 @@ function RecordsView({ data }: { data: RecordsData }) {
       </div>
       <p className="small faint legend">
         連線圓點：<span className="dot ok" /> 正常　<span className="dot down" /> 無回應　<span className="dot none" /> 未檢查或已停用　共{' '}
-        {data.records.length} 筆，{LEVEL_NAME.high} {data.records.filter((r) => rowLevel(r) === 'high').length} 筆
+        {data.records.length} 筆，{LEVEL_NAME.high} {counts.high} 筆
       </p>
     </div>
   );

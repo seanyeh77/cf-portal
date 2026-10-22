@@ -139,15 +139,11 @@ func (s *Server) portalData(r *http.Request) (map[string]any, error) {
 		return nil, err
 	}
 	services := []publicService{}
-	featured := []string{}
 	catCount := map[string]int{}
 	for _, l := range ls {
 		services = append(services, publicService{ID: l.RecordID, Title: l.Title, Description: l.Description, Category: l.Category,
 			URL: l.EffectiveURL(), Hostname: l.Hostname, Tags: splitTags(l.Tags), Icon: l.Icon, IconURL: iconURL(l),
 			Featured: l.Featured, SortOrder: l.SortOrder, CreatedAt: l.CreatedAt})
-		if l.Featured {
-			featured = append(featured, l.RecordID)
-		}
 		c := l.Category
 		if c == "" {
 			c = "其他"
@@ -166,7 +162,7 @@ func (s *Server) portalData(r *http.Request) (map[string]any, error) {
 		return a < b
 	})
 	return map[string]any{
-		"site": s.publicSettings(set), "categories": cats, "featured": featured, "services": services,
+		"site": s.publicSettings(set), "categories": cats, "services": services,
 		"status": status, "now": float64(s.Now().Unix()),
 	}, nil
 }

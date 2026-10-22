@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { api, errMsg } from '../../shared/api';
 import { Tip, toast } from '../../shared/ui';
-import { refreshRecords } from '../lib/data';
+import { act } from '../lib/data';
 import type { Settings } from '../types';
 
 const SWATCHES = ['#2dd4bf', '#38bdf8', '#818cf8', '#f472b6', '#fb923c', '#facc15', '#4ade80'];
@@ -93,16 +93,8 @@ export function SettingsPage() {
   const set = (k: string) => (e: { target: { value: string } }) => setForm((p) => ({ ...p, [k]: e.target.value }));
   const save = async () => {
     setBusy(true);
-    try {
-      await api('PUT', '/api/settings', form);
-      toast('已儲存');
-      q.refetch();
-      refreshRecords();
-    } catch (e) {
-      toast(errMsg(e), { error: true });
-    } finally {
-      setBusy(false);
-    }
+    await act(() => api('PUT', '/api/settings', form), '已儲存');
+    setBusy(false);
   };
   const onMedia = (s: Settings) => setMedia({ logo: s.logo_url, hero: s.hero_url });
 

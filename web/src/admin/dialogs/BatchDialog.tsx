@@ -6,18 +6,9 @@ import { CSV_TEMPLATE, csvObjects, truthy } from '../lib/csv';
 import { refreshRecords } from '../lib/data';
 import { REQUEST_TYPES, sub } from '../lib/records';
 import { closeModal } from '../lib/store';
-import type { RecordsData } from '../types';
+import type { Meta, RecordInput, RecordsData } from '../types';
 
-type Row = {
-  type: string;
-  name: string;
-  content: string;
-  ttl: number;
-  proxied: boolean;
-  priority: number | null;
-  comment: string;
-  meta: { owner: string; purpose: string; notes: string; expires_at: string; auto_delete: boolean; no_scan: boolean };
-};
+type Row = RecordInput & { meta: Meta };
 
 type Result = { index: number; ok: boolean; name: string; type: string; content: string; error?: string; warning?: string; record_id?: string };
 

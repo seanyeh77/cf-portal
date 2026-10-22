@@ -28,8 +28,8 @@ export function useRecords() {
 /** Refetches all data, except queries whose first key is in keep. */
 export async function refreshRecords(fresh = false, keep: string[] = []) {
   if (fresh) {
-    const d = await fetchRecords('/api/records?fresh=1');
-    queryClient.setQueryData(['records'], d);
+    queryClient.setQueryData(['records'], await fetchRecords('/api/records?fresh=1'));
+    keep = [...keep, 'records']; // just fetched
   }
   await queryClient.invalidateQueries({ predicate: (q) => !keep.includes(String(q.queryKey[0])) });
 }

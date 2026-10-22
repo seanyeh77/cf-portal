@@ -45,9 +45,6 @@ func TestRecordsListing(t *testing.T) {
 	if !strings.Contains(groups, "student 20") {
 		t.Errorf("groups %s", groups)
 	}
-	if fmt.Sprint(data["targets"].(map[string]any)["10.0.1.21"]) == "" {
-		t.Error("targets")
-	}
 }
 
 func TestCreateUpdateDelete(t *testing.T) {

@@ -1,5 +1,5 @@
 /** Parses RFC 4180 CSV text into rows of cells. */
-export function parseCSV(text: string): string[][] {
+function parseCSV(text: string): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
   let cell = '';
@@ -37,7 +37,7 @@ export function parseCSV(text: string): string[][] {
 
 /** Undoes the "'" the export adds in front of formula-like cells
  * (internal/httpapi/export.go cell()). */
-export function unescapeCell(v: string) {
+function unescapeCell(v: string) {
   return /^'[=+\-@\t\r']/.test(v) ? v.slice(1) : v;
 }
 

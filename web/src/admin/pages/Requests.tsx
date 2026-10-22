@@ -82,13 +82,13 @@ export function Requests() {
           </div>
         </div>
       ))}
-      {approve && <ApproveDialog req={approve} data={data} onClose={() => setApprove(null)} onDone={() => q.refetch()} />}
-      {reject && <RejectDialog req={reject} onClose={() => setReject(null)} onDone={() => q.refetch()} />}
+      {approve && <ApproveDialog req={approve} data={data} onClose={() => setApprove(null)} />}
+      {reject && <RejectDialog req={reject} onClose={() => setReject(null)} />}
     </div>
   );
 }
 
-function ApproveDialog({ req, data, onClose, onDone }: { req: RequestItem; data: RecordsData; onClose: () => void; onDone: () => void }) {
+function ApproveDialog({ req, data, onClose }: { req: RequestItem; data: RecordsData; onClose: () => void }) {
   const [type, setType] = useState(req.type);
   const [proxied, setProxied] = useState(false);
   const [name, setName] = useState(sub(req.name, data.zone));
@@ -110,7 +110,6 @@ function ApproveDialog({ req, data, onClose, onDone }: { req: RequestItem; data:
       });
       toast('已核准，連線檢查中');
       onClose();
-      onDone();
       refreshRecords();
     } catch (e) {
       setError(errMsg(e));
@@ -178,7 +177,7 @@ function ApproveDialog({ req, data, onClose, onDone }: { req: RequestItem; data:
   );
 }
 
-function RejectDialog({ req, onClose, onDone }: { req: RequestItem; onClose: () => void; onDone: () => void }) {
+function RejectDialog({ req, onClose }: { req: RequestItem; onClose: () => void }) {
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
   const submit = async () => {
@@ -190,7 +189,6 @@ function RejectDialog({ req, onClose, onDone }: { req: RequestItem; onClose: () 
       await api('POST', `/api/requests/${req.id}/reject`, { note });
       toast('已駁回');
       onClose();
-      onDone();
       refreshRecords();
     } catch (e) {
       setError(errMsg(e));

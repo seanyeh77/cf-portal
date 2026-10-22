@@ -3,6 +3,7 @@ package loop
 
 import (
 	"context"
+	"sync"
 	"time"
 )
 
@@ -19,4 +20,18 @@ func Every(ctx context.Context, d time.Duration, fn func(context.Context)) {
 			fn(ctx)
 		}
 	}
+}
+
+// ForEach runs fn(0..n-1) with at most limit calls at once and waits.
+func ForEach(n, limit int, fn func(i int)) {
+	sem := make(chan struct{}, limit)
+	var wg sync.WaitGroup
+	for i := range n {
+		sem <- struct{}{}
+		wg.Go(func() {
+			defer func() { <-sem }()
+			fn(i)
+		})
+	}
+	wg.Wait()
 }

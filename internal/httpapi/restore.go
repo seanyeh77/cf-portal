@@ -42,7 +42,7 @@ func (s *Server) restoreRecreate(w http.ResponseWriter, r *http.Request, b resto
 	if b.Meta != nil {
 		meta = *b.Meta
 	}
-	rec, _, err := s.createRecord(r, *b.Data, meta, "record_restore", map[string]any{"from_record_id": b.RecordID})
+	rec, _, err := s.createRecord(r, *b.Data, meta, false, "record_restore", map[string]any{"from_record_id": b.RecordID})
 	if err != nil {
 		writeAnyErr(w, err)
 		return

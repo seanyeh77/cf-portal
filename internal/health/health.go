@@ -31,7 +31,8 @@ type Checker struct {
 	client   *http.Client
 	// cache holds the summaries computed after the latest checks; public
 	// pages read it instead of scanning a day of check rows per request.
-	cache atomic.Pointer[summaries]
+	cache     atomic.Pointer[summaries]
+	refreshMu sync.Mutex
 }
 
 type summaries struct {
@@ -82,16 +83,7 @@ func (c *Checker) RunOnce(ctx context.Context) {
 		return
 	}
 	results := make([]store.Check, len(ls))
-	sem := make(chan struct{}, concurrency)
-	var wg sync.WaitGroup
-	for i, l := range ls {
-		sem <- struct{}{}
-		wg.Go(func() {
-			defer func() { <-sem }()
-			results[i] = c.Check(ctx, l)
-		})
-	}
-	wg.Wait()
+	loop.ForEach(len(ls), concurrency, func(i int) { results[i] = c.Check(ctx, ls[i]) })
 	c.record(ctx, results)
 }
 
@@ -124,35 +116,33 @@ type LastCheck struct {
 	Status int     `json:"status"`
 }
 
-// refresh recomputes the summaries of all listings from the stored checks.
+// refresh recomputes the summaries from aggregated checks. Only one
+// refresh runs at a time; callers arriving meanwhile reuse its result.
 func (c *Checker) refresh(ctx context.Context, now time.Time) error {
-	start := now.Truncate(bucketSize).Add(-(bucketCount - 1) * bucketSize)
-	from := now.Add(-24 * time.Hour)
-	if start.Before(from) {
-		from = start
+	c.refreshMu.Lock()
+	defer c.refreshMu.Unlock()
+	if cur := c.cache.Load(); cur != nil && !cur.at.Before(now) {
+		return nil
 	}
-	all, err := c.Store.ChecksSince(ctx, float64(from.Unix()))
+	start := bucketStart(now)
+	stats, err := c.Store.CheckStats(ctx, float64(start.Unix()), bucketSize.Seconds(), float64(now.Add(-24*time.Hour).Unix()))
 	if err != nil {
 		return err
 	}
-	ls, err := c.Store.Listings(ctx)
-	if err != nil {
-		return err
-	}
-	byID := make(map[string]Summary, len(ls))
-	for _, l := range ls {
-		byID[l.RecordID] = Summarize(all[l.RecordID], now)
+	byID := make(map[string]Summary, len(stats))
+	for id, st := range stats {
+		byID[id] = summaryOf(st, start)
 	}
 	c.cache.Store(&summaries{at: now, byID: byID})
 	return nil
 }
 
-// Summaries returns the cached summaries of the given listings (all if
-// nil). The cache is rebuilt after every check run, and when the
-// 30-minute buckets have moved on since.
+// Summaries returns the cached summaries of the given listings (all
+// records with checks if nil). The cache is rebuilt after every check run,
+// and when the 30-minute buckets have moved on since.
 func (c *Checker) Summaries(ctx context.Context, now time.Time, ls []model.Listing) (map[string]Summary, error) {
 	cur := c.cache.Load()
-	if cur == nil || !now.Truncate(bucketSize).Equal(cur.at.Truncate(bucketSize)) {
+	if cur == nil || !bucketStart(now).Equal(bucketStart(cur.at)) {
 		if err := c.refresh(ctx, now); err != nil {
 			return nil, err
 		}
@@ -163,45 +153,37 @@ func (c *Checker) Summaries(ctx context.Context, now time.Time, ls []model.Listi
 	}
 	out := make(map[string]Summary, len(ls))
 	for _, l := range ls {
-		out[l.RecordID] = cur.byID[l.RecordID]
+		sum, ok := cur.byID[l.RecordID]
+		if !ok {
+			sum = summaryOf(nil, bucketStart(cur.at)) // not checked yet
+		}
+		out[l.RecordID] = sum
 	}
 	return out, nil
 }
 
-// Summarize builds a summary from checks (oldest first).
-func Summarize(checks []store.Check, now time.Time) Summary {
-	start := now.Truncate(bucketSize).Add(-(bucketCount - 1) * bucketSize)
+// bucketStart is the start of the oldest of the 48 buckets ending at now.
+func bucketStart(now time.Time) time.Time {
+	return now.Truncate(bucketSize).Add(-(bucketCount - 1) * bucketSize)
+}
+
+// summaryOf turns aggregated checks (nil: none) into a summary.
+func summaryOf(st *store.CheckStat, start time.Time) Summary {
 	s := Summary{Buckets: make([]*float64, bucketCount), BucketStart: float64(start.Unix()), BucketSize: int(bucketSize.Seconds())}
-	var okN, total [bucketCount]int
-	day0 := float64(now.Add(-24 * time.Hour).Unix())
-	upOK, upTotal := 0, 0
-	for _, c := range checks {
-		if c.TS >= day0 {
-			upTotal++
-			if c.OK {
-				upOK++
-			}
-		}
-		i := int((c.TS - s.BucketStart) / bucketSize.Seconds())
-		if i >= 0 && i < bucketCount {
-			total[i]++
-			if c.OK {
-				okN[i]++
-			}
-		}
+	if st == nil {
+		return s
 	}
-	for i := range s.Buckets {
-		if total[i] > 0 {
-			v := ratio(okN[i], total[i])
+	for i, b := range st.Buckets {
+		if i >= 0 && i < bucketCount && b[1] > 0 {
+			v := ratio(b[0], b[1])
 			s.Buckets[i] = &v
 		}
 	}
-	if upTotal > 0 {
-		v := ratio(upOK, upTotal)
+	if st.UpTotal > 0 {
+		v := ratio(st.UpOK, st.UpTotal)
 		s.Uptime24 = &v
 	}
-	if n := len(checks); n > 0 {
-		l := checks[n-1]
+	if l := st.Last; l != nil {
 		s.Last = &LastCheck{TS: l.TS, OK: l.OK, MS: l.MS, Status: l.Status}
 	}
 	return s

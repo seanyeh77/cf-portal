@@ -167,7 +167,7 @@ export function MenuButton({
   );
 }
 
-export function FloatingMenu({
+function FloatingMenu({
   anchor,
   items,
   onClose,

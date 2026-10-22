@@ -241,7 +241,7 @@ func (s *Server) apiApprove(w http.ResponseWriter, r *http.Request) {
 		meta = *b.Meta
 	}
 	note := trimLen(b.Note, 500)
-	rec, _, err := s.createRecord(r, in, meta, "request_approve", map[string]any{"request_id": q.ID, "note": note})
+	rec, _, err := s.createRecord(r, in, meta, true, "request_approve", map[string]any{"request_id": q.ID, "note": note})
 	if err != nil {
 		writeAnyErr(w, err)
 		return

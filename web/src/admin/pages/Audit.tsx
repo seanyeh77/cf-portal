@@ -40,7 +40,7 @@ export function AuditPage() {
                   <td className="small wrap-any">{summarize(e)}</td>
                   <td>
                     {plan && (
-                      <button type="button" className={'btn small' + (plan.danger ? ' danger-text' : '')} onClick={() => runRestore(e).then(() => q.refetch())}>
+                      <button type="button" className={'btn small' + (plan.danger ? ' danger-text' : '')} onClick={() => runRestore(e)}>
                         {plan.label}
                       </button>
                     )}

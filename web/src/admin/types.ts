@@ -47,22 +47,15 @@ export type Listing = {
   icon_url: string;
 };
 
-export type DNSRecord = {
+export type DNSRecord = RecordInput & {
   id: string;
-  type: string;
-  name: string;
-  content: string;
-  ttl: number;
-  proxied: boolean;
-  priority: number | null;
-  comment: string;
   created_on?: string;
   modified_on?: string;
   editable: boolean;
   group: string;
   /** Row level from the server: the most severe non-info issue, or ''. */
   level: Level | '';
-  /** Canonical target for A/AAAA/CNAME, the key of RecordsData.targets. */
+  /** Canonical target for A/AAAA/CNAME, shared by records that point alike. */
   target_key: string;
   listing: Listing | null;
   meta: Meta;
@@ -95,7 +88,6 @@ export type RecordsData = {
   kinds: Record<string, Kind>;
   kind_order: string[];
   groups: [string, number][];
-  targets: Record<string, string[]>;
   scan: ScanStatus;
   pending_requests: number;
   last_snapshot: number;

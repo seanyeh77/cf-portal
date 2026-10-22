@@ -3,29 +3,15 @@ package httpapi
 import (
 	"net/http"
 	"strconv"
-	"sync"
 
 	"github.com/nycu-sdc/sdc-portal/internal/dnsrec"
+	"github.com/nycu-sdc/sdc-portal/internal/loop"
 	"github.com/nycu-sdc/sdc-portal/internal/model"
 )
 
 // cfWorkers bounds concurrent Cloudflare writes in bulk operations, well
 // within the API rate limit.
 const cfWorkers = 4
-
-// forEachCF runs fn(0..n-1) on cfWorkers goroutines and waits.
-func forEachCF(n int, fn func(i int)) {
-	sem := make(chan struct{}, cfWorkers)
-	var wg sync.WaitGroup
-	for i := range n {
-		sem <- struct{}{}
-		wg.Go(func() {
-			defer func() { <-sem }()
-			fn(i)
-		})
-	}
-	wg.Wait()
-}
 
 type batchResult struct {
 	Index    int    `json:"index"`
@@ -92,7 +78,7 @@ func (s *Server) apiBatch(w http.ResponseWriter, r *http.Request) {
 	var created []model.Record
 	if !b.DryRun {
 		recs := make([]*model.Record, len(results))
-		forEachCF(len(results), func(i int) {
+		loop.ForEach(len(results), cfWorkers, func(i int) {
 			if !results[i].OK {
 				return
 			}

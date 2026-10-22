@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react';
 import { api, errMsg } from '../../shared/api';
 import { confirmDialog, Dialog, DialogActions, Tip, toast } from '../../shared/ui';
 import { act, refreshRecords } from '../lib/data';
-import { sub } from '../lib/records';
+import { distinctOf, sub } from '../lib/records';
 import { closeModal } from '../lib/store';
 import type { DNSRecord, Listing, RecordsData } from '../types';
 
@@ -29,7 +29,7 @@ export function ListingDialog({ record, data }: { record: DNSRecord; data: Recor
   const [error, setError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const categories = useMemo(() => Array.from(new Set(data.records.map((r) => r.listing?.category).filter(Boolean) as string[])).sort(), [data.records]);
+  const categories = useMemo(() => distinctOf(data.records, (r) => r.listing?.category), [data.records]);
   const usedTags = useMemo(() => {
     const s = new Set<string>(PRESET_TAGS);
     data.records.forEach((r) => r.listing?.tags.split(',').forEach((t) => t.trim() && s.add(t.trim())));

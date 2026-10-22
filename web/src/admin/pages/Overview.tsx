@@ -4,7 +4,7 @@ import { fmtDateTimeShort, relTime } from '../../shared/format';
 import { copyText, Tip } from '../../shared/ui';
 import { go } from '../App';
 import { act, useRecords } from '../lib/data';
-import { EXPIRY_KINDS, LEVEL_NAME, rowLevel } from '../lib/records';
+import { EXPIRY_KINDS, LEVEL_NAME } from '../lib/records';
 import { modalStore, openEditor, setFilters } from '../lib/store';
 import type { RecordsData } from '../types';
 
@@ -40,7 +40,7 @@ function IssueList({ data, levels }: { data: RecordsData; levels: string[] }) {
             入口服務已失效
           </span>
           <span className="issue-count">{data.orphans.length} 筆</span>
-          <span className="small lv-medium">注意</span>
+          <span className="small lv-medium">{LEVEL_NAME.medium}</span>
           <span className="spacer" />
           <button type="button" className="btn small" onClick={() => go('records')}>
             查看
@@ -60,8 +60,8 @@ export function Overview() {
   if (error) return <div className="errbox">無法讀取 Cloudflare 資料：{errMsg(error)}</div>;
   if (!data) return <p className="muted">讀取中…</p>;
   const now = Date.now() / 1000;
-  const todo = data.records.filter((r) => rowLevel(r) !== '');
-  const urgent = data.records.filter((r) => rowLevel(r) === 'high').length;
+  const todo = data.records.filter((r) => r.level !== '');
+  const urgent = data.records.filter((r) => r.level === 'high').length;
   const listed = data.records.filter((r) => r.listing).length;
   const scan = data.scan;
   const enabled = data.settings.requests_enabled === '1';
