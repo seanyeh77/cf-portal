@@ -89,6 +89,7 @@ func (s *Server) routes() {
 	api("POST /api/records/restore", s.apiRestore)
 	api("POST /api/issues/mute", s.apiMute)
 	api("POST /api/scan", s.apiScan)
+	api("POST /api/records/{id}/scan", s.apiScanOne)
 	api("GET /api/export.csv", s.apiExportCSV)
 	api("PUT /api/listings/{id}", s.apiPutListing)
 	api("POST /api/listings/{id}/icon", s.apiUploadIcon)

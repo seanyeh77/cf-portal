@@ -1,0 +1,617 @@
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { api, errMsg } from '../../shared/api';
+import { addMonth, relTime, semesterEnd } from '../../shared/format';
+import { MenuButton, Tip, toast, type MenuItem } from '../../shared/ui';
+import { refreshRecords, useRecords } from '../lib/data';
+import {
+  describeFilters,
+  dotState,
+  EMPTY_FILTERS,
+  expiryView,
+  EXPIRY_KINDS,
+  EXPIRY_LABEL,
+  groupLabel,
+  hasIssue,
+  LEVEL_NAME,
+  matches,
+  PREFIX,
+  rowLevel,
+  sortRecords,
+  statusIssues,
+  sub,
+  syncedTip,
+  targetKey,
+  type Filters,
+  type SortKey,
+} from '../lib/records';
+import {
+  modalStore,
+  openDrawer,
+  openEditor,
+  pendingStore,
+  selectionStore,
+  setFilters,
+  useStore,
+  viewStore,
+} from '../lib/store';
+import type { DNSRecord, Issue, RecordsData } from '../types';
+
+export function Records() {
+  const { data, error, isLoading } = useRecords();
+  if (error) return <div className="errbox">無法讀取 Cloudflare 資料：{errMsg(error)}</div>;
+  if (isLoading || !data) return <p className="muted">讀取中…</p>;
+  return <RecordsView data={data} />;
+}
+
+async function saveMeta(id: string, patch: Record<string, unknown>, msg: string) {
+  try {
+    await api('PUT', `/api/records/${id}/meta`, patch);
+    toast(msg);
+    await refreshRecords();
+  } catch (e) {
+    toast(errMsg(e), { error: true });
+  }
+}
+
+export function extendItems(r: DNSRecord, today: string): MenuItem[] {
+  const cur = r.meta.expires_at;
+  const base = cur && cur > today ? cur : today;
+  return [
+    { label: `延長一個月（${addMonth(base)}）`, onClick: () => saveMeta(r.id, { expires_at: addMonth(base) }, `已延長到期日至 ${addMonth(base)}`) },
+    { label: `延長到學期末（${semesterEnd(today)}）`, onClick: () => saveMeta(r.id, { expires_at: semesterEnd(today) }, `已延長到期日至 ${semesterEnd(today)}`) },
+    { label: '取消到期日', onClick: () => saveMeta(r.id, { expires_at: '', auto_delete: false }, '已取消到期日') },
+    'sep',
+    { label: '自訂…', onClick: () => openEditor(r.id, 'expires') },
+  ];
+}
+
+const FIX_LINK: Record<string, [string, (r: DNSRecord, i: Issue) => void, boolean]> = {
+  bad_target: ['編輯目標', (r) => openEditor(r.id, 'content'), true],
+  dangling: ['編輯目標', (r) => openEditor(r.id, 'content'), true],
+  unclaimed: ['編輯目標', (r) => openEditor(r.id, 'content'), true],
+  loopback: ['編輯目標', (r) => openEditor(r.id, 'content'), true],
+  upstream_broken: ['前往上游', (_, i) => i.upstream && openDrawer(i.upstream), false],
+  proxied_private: ['編輯 Proxy', (r) => openEditor(r.id, 'proxied'), true],
+  name_rule: ['編輯名稱', (r) => openEditor(r.id, 'name'), true],
+  unproxied_web: ['編輯', (r) => openEditor(r.id), true],
+  zombie: ['停用檢查', (r) => saveMeta(r.id, { no_scan: true }, '已停用連線檢查'), false],
+};
+
+function StatusCell({ r, pending }: { r: DNSRecord; pending: boolean }) {
+  const shown = statusIssues(r);
+  const top = shown[0];
+  const rest = shown.slice(1);
+  const fix = top && FIX_LINK[top.kind];
+  return (
+    <div className="status-cell">
+      {pending && (
+        <div className="checking">
+          <span className="spin" aria-hidden /> 連線檢查中
+        </div>
+      )}
+      {top && (
+        <div className="status-line">
+          <span className={'lv-' + top.level + ' status-label'} tabIndex={0} data-tip={[top.detail, top.help].filter(Boolean).join('\n')}>
+            {PREFIX[top.level] ?? ''}
+            {top.label}
+          </span>
+          {rest.length > 0 && (
+            <span className="faint more" tabIndex={0} data-tip={rest.map((i) => (PREFIX[i.level] ?? '') + i.label).join('\n')}>
+              等 {rest.length} 項
+            </span>
+          )}
+          {fix && (fix[2] ? r.editable : true) && (
+            <button type="button" className="linkbtn fix" onClick={() => fix[1](r, top)}>
+              {fix[0]}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ExpiryCell({ r, today, warn }: { r: DNSRecord; today: string; warn: number }) {
+  const v = expiryView(r, today, warn);
+  if (!v) return null;
+  return (
+    <div className="expiry-cell">
+      <span className={v.cls} tabIndex={0} data-tip={v.tip}>
+        {v.text}
+      </span>
+      {v.extend && (
+        <MenuButton label="延長" className="linkbtn" items={extendItems(r, today)} align="left" testId={'extend-' + r.id} />
+      )}
+    </div>
+  );
+}
+
+function SortHead({ k, label, sort, tip }: { k: SortKey; label: string; sort: { key: SortKey; dir: string }; tip?: ReactNode }) {
+  const active = sort.key === k;
+  const arrow = active ? (sort.dir === 'desc' ? '↓' : '↑') : '↕';
+  const toggle = () =>
+    viewStore.set((v) => ({
+      ...v,
+      sort: { key: k, dir: v.sort.key === k ? (v.sort.dir === 'asc' ? 'desc' : 'asc') : k === 'status' ? 'desc' : 'asc' },
+    }));
+  return (
+    <th aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <span className="th-inner">
+        <button type="button" className={'sort' + (active ? ' active' : '')} onClick={toggle}>
+          {label} <span className="arrow">{arrow}</span>
+        </button>
+        {tip}
+      </span>
+    </th>
+  );
+}
+
+function useNow(interval = 30000) {
+  const [now, setNow] = useState(() => Date.now() / 1000);
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now() / 1000), interval);
+    return () => window.clearInterval(t);
+  }, [interval]);
+  return now;
+}
+
+function Row({
+  r,
+  data,
+  selected,
+  pending,
+  showExpiry,
+  now,
+}: {
+  r: DNSRecord;
+  data: RecordsData;
+  selected: boolean;
+  pending: boolean;
+  showExpiry: boolean;
+  now: number;
+}) {
+  const lv = rowLevel(r);
+  const dot = dotState(r, pending, now);
+  const s = sub(r.name, data.zone);
+  const unassigned = !r.meta.owner.trim();
+  const warn = +data.settings.expiry_warn_days || 14;
+  const metaLine = [r.meta.purpose, r.meta.owner].filter(Boolean).join(' · ');
+  const menu: MenuItem[] = [
+    { label: '詳細資料', onClick: () => openDrawer(r.id) },
+    { label: r.listing ? '入口設定' : '上架到入口', onClick: () => modalStore.set({ kind: 'listing', id: r.id }) },
+    'sep',
+    { label: '刪除', danger: true, onClick: () => modalStore.set({ kind: 'delete', id: r.id }) },
+  ];
+  return (
+    <tr
+      className={'row' + (lv === 'high' || lv === 'medium' ? ' bar-' + lv : '') + (selected ? ' selected' : '')}
+      data-testid={'row-' + s}
+      onClick={(e) => {
+        if ((e.target as Element).closest('a,button,input,label,select,textarea,[role=menu]')) return;
+        if (window.getSelection()?.toString()) return;
+        openDrawer(r.id);
+      }}
+    >
+      <td className="c-check">
+        <label className="check-hit" aria-label={'選取 ' + r.name}>
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={(e) =>
+              selectionStore.set((prev) => {
+                const n = new Set(prev);
+                if (e.target.checked) n.add(r.id);
+                else n.delete(r.id);
+                return n;
+              })
+            }
+          />
+        </label>
+      </td>
+      <td className="c-type mono faint">{r.type}</td>
+      <td className="c-name">
+        <div className="name-line">
+          <span className="mono name-sub">{s}</span>
+          {s !== '@' && <span className="mono zone-suffix">.{data.zone}</span>}
+        </div>
+        <div className="meta-line small">
+          {unassigned ? (
+            <>
+              {r.meta.purpose && <span className="muted">{r.meta.purpose} · </span>}
+              <span className="muted">未指派負責人</span>
+              <button
+                type="button"
+                className="linkbtn assign"
+                onClick={() => modalStore.set({ kind: 'bulkMeta', ids: [r.id], focusOwner: true })}
+              >
+                指派
+              </button>
+            </>
+          ) : (
+            <span className="muted" tabIndex={r.meta.notes ? 0 : undefined} data-tip={r.meta.notes || undefined}>
+              {metaLine}
+            </span>
+          )}
+        </div>
+        {r.listing && (
+          <div className="small muted" data-tip={r.listing.effective_url}>
+            入口：{r.listing.title}
+          </div>
+        )}
+      </td>
+      <td className="c-target">
+        <div className="target-line">
+          <span className={'dot ' + dot.state} data-tip={dot.tip || undefined} tabIndex={dot.tip ? 0 : undefined} aria-label={dot.tip || undefined} />
+          <span className="mono target" data-tip={r.content.length > 34 ? r.content : undefined}>
+            {r.type === 'MX' && r.priority != null ? `${r.priority} ` : ''}
+            {r.content}
+          </span>
+        </div>
+        {r.proxied && <div className="small faint proxied">Proxied</div>}
+      </td>
+      <td className="c-status">
+        <StatusCell r={r} pending={pending} />
+      </td>
+      {showExpiry && (
+        <td className="c-expiry">
+          <ExpiryCell r={r} today={data.today} warn={warn} />
+        </td>
+      )}
+      <td className="c-actions">
+        <div className="actions">
+          <button
+            type="button"
+            className="btn small"
+            disabled={!r.editable}
+            data-tip={r.editable ? undefined : `${r.type} 請於 Cloudflare 編輯`}
+            onClick={() => openEditor(r.id)}
+          >
+            編輯
+          </button>
+          <MenuButton label="⋯" className="btn small more-btn" ariaLabel={'更多操作 ' + r.name} items={menu} testId={'more-' + s} />
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+function RecordsView({ data }: { data: RecordsData }) {
+  const view = useStore(viewStore);
+  const selection = useStore(selectionStore);
+  const pending = useStore(pendingStore);
+  const now = useNow();
+  const f = view.filters;
+  const zone = data.zone;
+
+  const base = useMemo(() => data.records.filter((r) => matches(r, f, data.today, true)), [data, f]);
+  const filtered = useMemo(() => base.filter((r) => !f.severity || rowLevel(r) === f.severity), [base, f.severity]);
+  const sorted = useMemo(() => sortRecords(filtered, view.sort, zone, data.today), [filtered, view.sort, zone, data.today]);
+  const counts = useMemo(() => {
+    const c = { all: base.length, high: 0, medium: 0, low: 0 };
+    for (const r of base) {
+      const lv = rowLevel(r);
+      if (lv === 'high' || lv === 'medium' || lv === 'low') c[lv]++;
+    }
+    return c;
+  }, [base]);
+  const showExpiry = filtered.some((r) => r.meta.expires_at);
+  const unassigned = data.records.filter((r) => hasIssue(r, 'no_owner'));
+  const types = Array.from(new Set(data.records.map((r) => r.type))).sort();
+  const desc = describeFilters(f, data);
+  const anyFilter = desc.length > 0;
+  const selectedIds = Array.from(selection).filter((id) => data.records.some((r) => r.id === id));
+  const allChecked = sorted.length > 0 && sorted.every((r) => selection.has(r.id));
+
+  // Clear selections of records that no longer exist.
+  useEffect(() => {
+    if (selectedIds.length !== selection.size) selectionStore.set(new Set(selectedIds));
+  }, [selectedIds.length, selection.size]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const kindOptions = data.kind_order.filter((k) => !EXPIRY_KINDS.has(k));
+  const expiryCount = (k: string) =>
+    k === 'has' ? data.records.filter((r) => r.meta.expires_at).length : k === 'none' ? data.records.filter((r) => !r.meta.expires_at).length : data.summary[k] ?? 0;
+
+  const setF = (p: Partial<Filters>) => setFilters(p);
+  const cols = showExpiry ? 7 : 6;
+
+  const groups = useMemo(() => {
+    if (!view.byTarget) return null;
+    const by = new Map<string, DNSRecord[]>();
+    const other: DNSRecord[] = [];
+    for (const r of sorted) {
+      const k = targetKey(r);
+      if (k && data.targets[k]) {
+        if (!by.has(k)) by.set(k, []);
+        by.get(k)!.push(r);
+      } else other.push(r);
+    }
+    const out = Array.from(by.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+    return { out, other };
+  }, [view.byTarget, sorted, data.targets]);
+
+  const renderRow = (r: DNSRecord) => (
+    <Row key={r.id} r={r} data={data} selected={selection.has(r.id)} pending={r.id in pending} showExpiry={showExpiry} now={now} />
+  );
+
+  return (
+    <div className="records">
+      <div className="filter-row">
+        <input
+          className="input search"
+          type="search"
+          placeholder="搜尋名稱、內容、負責人"
+          aria-label="搜尋"
+          value={f.q}
+          onChange={(e) => setF({ q: e.target.value })}
+        />
+        <select className="input" aria-label="類型" value={f.type} onChange={(e) => setF({ type: e.target.value })}>
+          <option value="">全部類型</option>
+          {types.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
+        <select className="input" aria-label="分組" value={f.group} onChange={(e) => setF({ group: e.target.value })}>
+          <option value="">全部分組</option>
+          {data.groups.map(([g, n]) => (
+            <option key={g} value={g}>
+              {groupLabel(g)}（{n}）
+            </option>
+          ))}
+        </select>
+        <select className="input" aria-label="健康狀態" value={f.health} onChange={(e) => setF({ health: e.target.value })}>
+          <option value="">全部健康狀態</option>
+          {kindOptions.map((k) => (
+            <option key={k} value={k}>
+              {data.kinds[k].label}（{data.summary[k] ?? 0}）
+            </option>
+          ))}
+          <option value="listed">已上架到入口（{data.records.filter((r) => r.listing).length}）</option>
+          <option value="muted">含已忽略項目（{data.records.filter((r) => r.muted.length).length}）</option>
+        </select>
+        <select className="input" aria-label="到期狀態" value={f.expiry} onChange={(e) => setF({ expiry: e.target.value })}>
+          <option value="">全部到期狀態</option>
+          {['expired', 'expiring', 'has', 'none'].map((k) => (
+            <option key={k} value={k}>
+              {EXPIRY_LABEL[k]}（{expiryCount(k)}）
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="toolbar-row">
+        <div className="severity">
+          {(
+            [
+              ['', '全部', counts.all],
+              ['high', '緊急', counts.high],
+              ['medium', '注意', counts.medium],
+              ['low', '建議', counts.low],
+            ] as const
+          ).map(([k, label, n], i) => (
+            <Fragment key={k}>
+              {i > 0 && <span className="faint sep">·</span>}
+              <button
+                type="button"
+                className={'sev-link' + (f.severity === k ? ' active' : '') + (k ? ' sev-' + k : '')}
+                aria-pressed={f.severity === k}
+                onClick={() => setF({ severity: k })}
+              >
+                {label} {n}
+              </button>
+            </Fragment>
+          ))}
+          <Tip text="依每筆最嚴重的問題計算，每筆只算一次。" />
+        </div>
+        <div className="toolbar-right">
+          <button type="button" className="linkbtn" onClick={() => viewStore.set((v) => ({ ...v, byTarget: !v.byTarget }))}>
+            {view.byTarget ? '改為清單檢視' : '依目標分組'}
+          </button>
+          <span className="small muted" tabIndex={0} data-tip={syncedTip(data.synced_at)}>
+            更新於 {relTime(data.synced_at, now)}
+          </span>
+          <button
+            type="button"
+            className="btn"
+            onClick={() =>
+              refreshRecords(true).then(
+                () => toast('已重新整理'),
+                (e) => toast(errMsg(e), { error: true }),
+              )
+            }
+          >
+            重新整理
+          </button>
+          <MenuButton
+            label="批次與匯入匯出 ▾"
+            items={[
+              { label: '批次新增', onClick: () => modalStore.set({ kind: 'batch', mode: 'rule' }) },
+              { label: '匯入 CSV', onClick: () => modalStore.set({ kind: 'batch', mode: 'csv' }) },
+              'sep',
+              { label: '匯出交接清單', onClick: () => window.location.assign('/api/export.csv') },
+            ]}
+          />
+          <button type="button" className="btn primary" onClick={() => openEditor()}>
+            新增 Record
+          </button>
+        </div>
+      </div>
+
+      {anyFilter && (
+        <div className="filter-desc">
+          目前篩選：{desc.join('、')}，符合 {filtered.length} 筆
+          <button type="button" className="linkbtn" onClick={() => setFilters(EMPTY_FILTERS, true)}>
+            清除全部
+          </button>
+        </div>
+      )}
+
+      {data.orphans.length > 0 && (
+        <div className="warnbox">
+          下列入口服務的 record 已不存在，請下架：
+          <ul className="orphans">
+            {data.orphans.map((o) => (
+              <li key={o.record_id}>
+                {o.title} <span className="mono faint">{o.hostname}</span>{' '}
+                <button
+                  type="button"
+                  className="btn small"
+                  onClick={async () => {
+                    try {
+                      await api('DELETE', `/api/listings/${o.record_id}`);
+                      toast('已下架');
+                      refreshRecords();
+                    } catch (e) {
+                      toast(errMsg(e), { error: true });
+                    }
+                  }}
+                >
+                  下架
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {unassigned.length > 0 && (
+        <div className="banner">
+          <span>{unassigned.length} 筆未指派負責人</span>
+          <button type="button" className="linkbtn" onClick={() => setFilters({ health: 'no_owner' }, true)}>
+            查看
+          </button>
+          <button
+            type="button"
+            className="linkbtn"
+            onClick={() => {
+              const ids = unassigned.map((r) => r.id);
+              selectionStore.set(new Set(ids));
+              modalStore.set({ kind: 'bulkMeta', ids, focusOwner: true });
+            }}
+          >
+            批次指派
+          </button>
+        </div>
+      )}
+
+      {selectedIds.length > 0 && (
+        <div className="bulkbar" role="region" aria-label="批次操作">
+          <span>已選 {selectedIds.length} 筆</span>
+          <button type="button" className="linkbtn" onClick={() => modalStore.set({ kind: 'bulkMeta', ids: selectedIds })}>
+            設定管理資訊
+          </button>
+          <button type="button" className="linkbtn" onClick={() => modalStore.set({ kind: 'bulkDelete', ids: selectedIds })}>
+            刪除
+          </button>
+          <MenuButton
+            label="…"
+            className="linkbtn"
+            ariaLabel="更多批次操作"
+            align="left"
+            items={[
+              {
+                label: '停用連線檢查',
+                onClick: () => bulkSet(selectedIds, { no_scan: true }, '已停用連線檢查'),
+              },
+              {
+                label: '啟用連線檢查',
+                onClick: () => bulkSet(selectedIds, { no_scan: false }, '已啟用連線檢查'),
+              },
+              {
+                label: '延長到學期末',
+                onClick: () => bulkSet(selectedIds, { expires_at: semesterEnd(data.today) }, `已將到期日設為 ${semesterEnd(data.today)}`),
+              },
+            ]}
+          />
+          <span className="spacer" />
+          <button type="button" className="linkbtn" onClick={() => selectionStore.set(new Set())}>
+            取消選取
+          </button>
+        </div>
+      )}
+
+      <div className="table-wrap">
+        <table className="rec-table">
+          <thead>
+            <tr>
+              <th className="c-check">
+                <label className="check-hit" aria-label="全選目前篩選結果">
+                  <input
+                    type="checkbox"
+                    checked={allChecked}
+                    onChange={(e) =>
+                      selectionStore.set((prev) => {
+                        const n = new Set(prev);
+                        sorted.forEach((r) => (e.target.checked ? n.add(r.id) : n.delete(r.id)));
+                        return n;
+                      })
+                    }
+                  />
+                </label>
+              </th>
+              <SortHead k="type" label="類型" sort={view.sort} />
+              <SortHead k="name" label="名稱" sort={view.sort} />
+              <SortHead k="content" label="指向" sort={view.sort} />
+              <SortHead
+                k="status"
+                label="狀況"
+                sort={view.sort}
+                tip={<Tip text="列出需處理的項目。左側色條：紅色為緊急，橘色為注意。點選欄位標題可排序。" />}
+              />
+              {showExpiry && <SortHead k="expiry" label="到期" sort={view.sort} />}
+              <th className="c-actions">
+                <span className="sr-only">操作</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.length === 0 && (
+              <tr>
+                <td colSpan={cols} className="empty">
+                  無符合項目
+                </td>
+              </tr>
+            )}
+            {groups
+              ? [
+                  ...groups.out.map(([k, rows]) => (
+                    <Fragment key={k}>
+                      <tr className="group-head">
+                        <td colSpan={cols}>
+                          → <span className="mono">{k}</span>（{rows.length} 筆）
+                        </td>
+                      </tr>
+                      {rows.map(renderRow)}
+                    </Fragment>
+                  )),
+                  groups.other.length > 0 && (
+                    <Fragment key="__other">
+                      <tr className="group-head">
+                        <td colSpan={cols}>其他（{groups.other.length} 筆）</td>
+                      </tr>
+                      {groups.other.map(renderRow)}
+                    </Fragment>
+                  ),
+                ]
+              : sorted.map(renderRow)}
+          </tbody>
+        </table>
+      </div>
+      <p className="small faint legend">
+        連線圓點：<span className="dot ok" /> 正常　<span className="dot down" /> 無回應　<span className="dot none" /> 未檢查或已停用　共{' '}
+        {data.records.length} 筆，{LEVEL_NAME.high} {data.records.filter((r) => rowLevel(r) === 'high').length} 筆
+      </p>
+    </div>
+  );
+}
+
+async function bulkSet(ids: string[], set: Record<string, unknown>, msg: string) {
+  try {
+    await api('POST', '/api/records/bulk-meta', { ids, set });
+    toast(msg);
+    refreshRecords();
+  } catch (e) {
+    toast(errMsg(e), { error: true });
+  }
+}

@@ -828,6 +828,16 @@ func (s *Server) apiScan(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]any{"started": started, "scan": s.Scanner.Status()})
 }
 
+func (s *Server) apiScanOne(w http.ResponseWriter, r *http.Request) {
+	rec, err := s.CF.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeAnyErr(w, err)
+		return
+	}
+	s.Scanner.ScanSoon(*rec)
+	writeJSON(w, http.StatusAccepted, map[string]any{"started": true})
+}
+
 func (s *Server) recordByID(ctx context.Context, id string) (*model.Record, error) {
 	recs, _, err := s.CF.List(ctx, false)
 	if err != nil {

@@ -2,10 +2,14 @@
 package mockcf
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"net/http"
 	"net/netip"
 	"sort"
@@ -378,6 +382,28 @@ var (
 	ICO  = append([]byte{0, 0, 1, 0, 1, 0, 1, 1, 0, 0, 1, 0, 32, 0}, make([]byte, 40)...)
 )
 
+// iconPNG draws a 32x32 two-colour icon whose colour depends on name.
+func iconPNG(name string) []byte {
+	h := 0
+	for _, c := range name {
+		h = h*31 + int(c)
+	}
+	fg := color.RGBA{uint8(60 + h%150), uint8(90 + (h/7)%120), uint8(140 + (h/13)%100), 255}
+	img := image.NewRGBA(image.Rect(0, 0, 32, 32))
+	for y := 0; y < 32; y++ {
+		for x := 0; x < 32; x++ {
+			c := fg
+			if (x-16)*(x-16)+(y-16)*(y-16) < 64 {
+				c = color.RGBA{255, 255, 255, 255}
+			}
+			img.Set(x, y, c)
+		}
+	}
+	var buf bytes.Buffer
+	png.Encode(&buf, img)
+	return buf.Bytes()
+}
+
 func (s *Server) serveSvc(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/svc/")
 	name, file, _ := strings.Cut(rest, "/")
@@ -395,7 +421,7 @@ func (s *Server) serveSvc(w http.ResponseWriter, r *http.Request) {
 </head><body>%s</body></html>`, name, name, name)
 	case "apple.png", "favicon-32.png":
 		w.Header().Set("Content-Type", "image/png")
-		w.Write(PNG1)
+		w.Write(iconPNG(name))
 	case "mask.svg":
 		w.Header().Set("Content-Type", "image/svg+xml")
 		w.Write([]byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`))
