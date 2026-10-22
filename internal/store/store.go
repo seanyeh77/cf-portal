@@ -161,6 +161,35 @@ func (s *Store) Close() error { return s.db.Close() }
 // Ping checks the database.
 func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
 
+// rowScanner is *sql.Row or *sql.Rows.
+type rowScanner interface{ Scan(...any) error }
+
+// each runs q and calls fn for every row; it owns Close and Err.
+func (s *Store) each(ctx context.Context, fn func(*sql.Rows) error, q string, args ...any) error {
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		if err := fn(rows); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+// list returns one scanned value per row (never nil).
+func list[T any](ctx context.Context, s *Store, scan func(rowScanner) (T, error), q string, args ...any) ([]T, error) {
+	out := []T{}
+	err := s.each(ctx, func(r *sql.Rows) error {
+		v, err := scan(r)
+		out = append(out, v)
+		return err
+	}, q, args...)
+	return out, err
+}
+
 func now() float64 { return float64(time.Now().UnixNano()) / 1e9 }
 
 // ---- settings ----
@@ -182,19 +211,13 @@ func (s *Store) Settings(ctx context.Context) (map[string]string, error) {
 	if out == nil {
 		out = DefaultSettings("SDC Services")
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT key, value FROM settings")
-	if err != nil {
-		return out, err
-	}
-	defer rows.Close()
-	for rows.Next() {
+	err := s.each(ctx, func(r *sql.Rows) error {
 		var k, v string
-		if err := rows.Scan(&k, &v); err != nil {
-			return out, err
-		}
+		err := r.Scan(&k, &v)
 		out[k] = v
-	}
-	return out, rows.Err()
+		return err
+	}, "SELECT key, value FROM settings")
+	return out, err
 }
 
 // SettingInt returns an integer setting, falling back to its default.
@@ -225,21 +248,15 @@ func (s *Store) SetSettings(ctx context.Context, kv map[string]string) error {
 
 // AllMeta returns meta keyed by record id.
 func (s *Store) AllMeta(ctx context.Context) (map[string]model.Meta, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT record_id, owner, purpose, notes, expires_at, auto_delete, no_scan FROM record_meta")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
 	out := map[string]model.Meta{}
-	for rows.Next() {
+	err := s.each(ctx, func(r *sql.Rows) error {
 		var id string
 		var m model.Meta
-		if err := rows.Scan(&id, &m.Owner, &m.Purpose, &m.Notes, &m.ExpiresAt, &m.AutoDelete, &m.NoScan); err != nil {
-			return nil, err
-		}
+		err := r.Scan(&id, &m.Owner, &m.Purpose, &m.Notes, &m.ExpiresAt, &m.AutoDelete, &m.NoScan)
 		out[id] = m
-	}
-	return out, rows.Err()
+		return err
+	}, "SELECT record_id, owner, purpose, notes, expires_at, auto_delete, no_scan FROM record_meta")
+	return out, err
 }
 
 // querier is *sql.DB or *sql.Tx.
@@ -322,26 +339,21 @@ func (s *Store) ForgetRecord(ctx context.Context, id string) (*model.Listing, er
 
 // AllScans returns scan results keyed by record id.
 func (s *Store) AllScans(ctx context.Context) (map[string]model.Scan, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT record_id, first_ts, last_ts, last_ok_ts, reachable, open_ports, detail, dns_status, dns_detail FROM record_scan")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
 	out := map[string]model.Scan{}
-	for rows.Next() {
+	err := s.each(ctx, func(r *sql.Rows) error {
 		var id string
 		var sc model.Scan
 		var lastOK sql.NullFloat64
-		if err := rows.Scan(&id, &sc.FirstTS, &sc.LastTS, &lastOK, &sc.Reachable, &sc.OpenPorts, &sc.Detail, &sc.DNSStatus, &sc.DNSDetail); err != nil {
-			return nil, err
+		if err := r.Scan(&id, &sc.FirstTS, &sc.LastTS, &lastOK, &sc.Reachable, &sc.OpenPorts, &sc.Detail, &sc.DNSStatus, &sc.DNSDetail); err != nil {
+			return err
 		}
 		if lastOK.Valid {
-			v := lastOK.Float64
-			sc.LastOKTS = &v
+			sc.LastOKTS = &lastOK.Float64
 		}
 		out[id] = sc
-	}
-	return out, rows.Err()
+		return nil
+	}, "SELECT record_id, first_ts, last_ts, last_ok_ts, reachable, open_ports, detail, dns_status, dns_detail FROM record_scan")
+	return out, err
 }
 
 // PutScan records a scan result. first_ts is kept from the first write and
@@ -382,23 +394,19 @@ func (s *Store) PruneScans(ctx context.Context, keep map[string]bool, ts float64
 
 // Mutes returns muted kinds keyed by record id.
 func (s *Store) Mutes(ctx context.Context) (map[string]map[string]bool, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT record_id, kind FROM issue_mutes")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
 	out := map[string]map[string]bool{}
-	for rows.Next() {
+	err := s.each(ctx, func(r *sql.Rows) error {
 		var id, k string
-		if err := rows.Scan(&id, &k); err != nil {
-			return nil, err
+		if err := r.Scan(&id, &k); err != nil {
+			return err
 		}
 		if out[id] == nil {
 			out[id] = map[string]bool{}
 		}
 		out[id][k] = true
-	}
-	return out, rows.Err()
+		return nil
+	}, "SELECT record_id, kind FROM issue_mutes")
+	return out, err
 }
 
 // SetMute mutes or unmutes an issue.
@@ -416,7 +424,7 @@ func (s *Store) SetMute(ctx context.Context, id, kind string, muted bool) error 
 
 const listingCols = "record_id, hostname, title, description, category, url, sort_order, featured, tags, icon, icon_file, COALESCE(created_at, updated_at), updated_at"
 
-func scanListing(sc interface{ Scan(...any) error }) (model.Listing, error) {
+func scanListing(sc rowScanner) (model.Listing, error) {
 	var l model.Listing
 	var url, icon sql.NullString
 	err := sc.Scan(&l.RecordID, &l.Hostname, &l.Title, &l.Description, &l.Category, &url, &l.SortOrder, &l.Featured, &l.Tags, &l.Icon, &icon, &l.CreatedAt, &l.UpdatedAt)
@@ -431,20 +439,7 @@ func scanListing(sc interface{ Scan(...any) error }) (model.Listing, error) {
 
 // Listings returns all listings ordered for display.
 func (s *Store) Listings(ctx context.Context) ([]model.Listing, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT "+listingCols+" FROM listings ORDER BY sort_order, title COLLATE NOCASE")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []model.Listing
-	for rows.Next() {
-		l, err := scanListing(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, l)
-	}
-	return out, rows.Err()
+	return list(ctx, s, scanListing, "SELECT "+listingCols+" FROM listings ORDER BY sort_order, title COLLATE NOCASE")
 }
 
 // Listing returns one listing.
@@ -551,18 +546,11 @@ func (s *Store) CheckStats(ctx context.Context, bucketStart, bucketSec, day0 flo
 	}
 	// One pass since day0: checks before bucketStart land in bucket -1 and
 	// only count toward the 24-hour totals.
-	rows, err := s.db.QueryContext(ctx, `SELECT record_id,
-		CASE WHEN ts>=?1 THEN CAST((ts-?1)/?2 AS INTEGER) ELSE -1 END AS b, SUM(ok), COUNT(*)
-		FROM checks WHERE ts>=?3 GROUP BY record_id, b`, bucketStart, bucketSec, day0)
-	if err != nil {
-		return nil, err
-	}
-	for rows.Next() {
+	err := s.each(ctx, func(r *sql.Rows) error {
 		var id string
 		var b, ok, n int
-		if err := rows.Scan(&id, &b, &ok, &n); err != nil {
-			rows.Close()
-			return nil, err
+		if err := r.Scan(&id, &b, &ok, &n); err != nil {
+			return err
 		}
 		st := get(id)
 		st.UpOK += ok
@@ -570,36 +558,34 @@ func (s *Store) CheckStats(ctx context.Context, bucketStart, bucketSec, day0 flo
 		if b >= 0 {
 			st.Buckets[b] = [2]int{ok, n}
 		}
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	// The latest check per record: one index seek each.
-	rows, err = s.db.QueryContext(ctx, `SELECT c.record_id, c.ts, c.ok, c.ms, c.status
-		FROM (SELECT DISTINCT record_id FROM checks) r
-		JOIN checks c ON c.rowid = (SELECT rowid FROM checks WHERE record_id = r.record_id ORDER BY ts DESC LIMIT 1)`)
+		return nil
+	}, `SELECT record_id,
+		CASE WHEN ts>=?1 THEN CAST((ts-?1)/?2 AS INTEGER) ELSE -1 END AS b, SUM(ok), COUNT(*)
+		FROM checks WHERE ts>=?3 GROUP BY record_id, b`, bucketStart, bucketSec, day0)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	for rows.Next() {
+	// The latest check per record: one index seek each.
+	err = s.each(ctx, func(r *sql.Rows) error {
 		c := Check{}
 		var st sql.NullInt64
-		if err := rows.Scan(&c.RecordID, &c.TS, &c.OK, &c.MS, &st); err != nil {
-			return nil, err
+		if err := r.Scan(&c.RecordID, &c.TS, &c.OK, &c.MS, &st); err != nil {
+			return err
 		}
 		c.Status = int(st.Int64)
 		get(c.RecordID).Last = &c
-	}
-	return out, rows.Err()
+		return nil
+	}, `SELECT c.record_id, c.ts, c.ok, c.ms, c.status
+		FROM (SELECT DISTINCT record_id FROM checks) r
+		JOIN checks c ON c.rowid = (SELECT rowid FROM checks WHERE record_id = r.record_id ORDER BY ts DESC LIMIT 1)`)
+	return out, err
 }
 
 // ---- requests ----
 
 const requestCols = "id, token, ts, ip, COALESCE(requester,''), COALESCE(contact,''), COALESCE(name,''), COALESCE(type,''), COALESCE(content,''), COALESCE(purpose,''), COALESCE(expires_at,''), status, admin_note, decided_ts, record_id"
 
-func scanRequest(sc interface{ Scan(...any) error }) (model.Request, error) {
+func scanRequest(sc rowScanner) (model.Request, error) {
 	var r model.Request
 	var dec sql.NullFloat64
 	var rid sql.NullString
@@ -625,20 +611,7 @@ func (s *Store) AddRequest(ctx context.Context, r model.Request) (int64, error) 
 
 // Requests returns all requests, pending first, newest first.
 func (s *Store) Requests(ctx context.Context) ([]model.Request, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT "+requestCols+" FROM requests ORDER BY status<>'pending', COALESCE(decided_ts, ts) DESC LIMIT 500")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []model.Request
-	for rows.Next() {
-		r, err := scanRequest(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
+	return list(ctx, s, scanRequest, "SELECT "+requestCols+" FROM requests ORDER BY status<>'pending', COALESCE(decided_ts, ts) DESC LIMIT 500")
 }
 
 // Request returns one request by id.
@@ -697,20 +670,10 @@ func (s *Store) AddAudit(ctx context.Context, ip, action, target, detail string)
 }
 
 func (s *Store) audit(ctx context.Context, where string, args ...any) ([]model.AuditEntry, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id, ts, COALESCE(ip,''), COALESCE(action,''), COALESCE(target,''), COALESCE(detail,'') FROM audit "+where, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []model.AuditEntry{}
-	for rows.Next() {
-		var a model.AuditEntry
-		if err := rows.Scan(&a.ID, &a.TS, &a.IP, &a.Action, &a.Target, &a.Detail); err != nil {
-			return nil, err
-		}
-		out = append(out, a)
-	}
-	return out, rows.Err()
+	return list(ctx, s, func(r rowScanner) (a model.AuditEntry, err error) {
+		err = r.Scan(&a.ID, &a.TS, &a.IP, &a.Action, &a.Target, &a.Detail)
+		return
+	}, "SELECT id, ts, COALESCE(ip,''), COALESCE(action,''), COALESCE(target,''), COALESCE(detail,'') FROM audit "+where, args...)
 }
 
 // Audit returns the latest n audit rows.
