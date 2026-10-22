@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api, errMsg } from '../../shared/api';
 import { fmtDateTimeShort } from '../../shared/format';
-import { confirmDialog, Tip, toast } from '../../shared/ui';
+import { confirmDialog, Tip } from '../../shared/ui';
 import { act } from '../lib/data';
 import { DNS_FIELD_LABEL, fieldValue } from '../lib/records';
 import type { SnapshotDiff, SnapshotInfo, SnapRecord } from '../types';
@@ -11,7 +11,14 @@ const field = (r: object, f: string) => (r as Record<string, unknown>)[f];
 
 export function Snapshots() {
   const q = useQuery({ queryKey: ['snapshots'], queryFn: () => api<{ snapshots: SnapshotInfo[]; keep: number }>('GET', '/api/snapshots') });
-  const [diff, setDiff] = useState<SnapshotDiff | null>(null);
+  // The comparison is a query, so every mutation's refresh updates it.
+  const [compared, setCompared] = useState('');
+  const diffQ = useQuery({
+    queryKey: ['snapshot-diff', compared],
+    queryFn: () => api<SnapshotDiff>('GET', `/api/snapshots/${encodeURIComponent(compared)}/diff`),
+    enabled: compared !== '',
+  });
+  const diff = diffQ.data ?? null;
   const [busy, setBusy] = useState(false);
 
   const create = async () => {
@@ -19,21 +26,11 @@ export function Snapshots() {
     await act(() => api('POST', '/api/snapshots'), '已建立快照');
     setBusy(false);
   };
-  const compare = async (name: string) => {
-    try {
-      setDiff(await api<SnapshotDiff>('GET', `/api/snapshots/${encodeURIComponent(name)}/diff`));
-    } catch (e) {
-      toast(errMsg(e), { error: true });
-    }
-  };
+  const compare = (name: string) => (name === compared ? diffQ.refetch() : setCompared(name));
   const restore = async (title: string, body: Record<string, unknown>, describe: string, danger = false) => {
     const ok = await confirmDialog({ title, body: <p className="pre">{describe}</p>, confirmText: title, danger });
     if (!ok) return;
-    // Refresh the comparison alongside the record refresh act() starts.
-    await act(async () => {
-      await api('POST', '/api/records/restore', body);
-      if (diff) compare(diff.name);
-    }, '已還原');
+    await act(() => api('POST', '/api/records/restore', body), '已還原');
   };
   const input = (r: SnapRecord) => ({ type: r.type, name: r.name, content: r.content, ttl: r.ttl, proxied: r.proxied, priority: r.priority, comment: r.comment });
 
@@ -47,7 +44,7 @@ export function Snapshots() {
           立即建立快照
         </button>
       </div>
-      {q.error && <div className="errbox">{errMsg(q.error)}</div>}
+      {(q.error || diffQ.error) && <div className="errbox">{errMsg(q.error ?? diffQ.error)}</div>}
       <table className="plain snap-table">
         <thead>
           <tr>

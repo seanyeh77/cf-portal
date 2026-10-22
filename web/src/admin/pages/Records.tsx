@@ -141,6 +141,15 @@ function SortHead({ k, label, sort, tip }: { k: SortKey; label: string; sort: { 
   );
 }
 
+/** "更新於 …" for the last Cloudflare sync; ticks on the shared clock. */
+function SyncedAt({ at }: { at: number }) {
+  return (
+    <span className="small muted" tabIndex={0} data-tip={syncedTip(at)}>
+      更新於 {relTime(at, useNow())}
+    </span>
+  );
+}
+
 /** The connection dot; reads the shared clock so rows need not re-render. */
 function ConnDot({ r, pending }: { r: DNSRecord; pending: boolean }) {
   const dot = dotState(r, pending, useNow());
@@ -272,7 +281,6 @@ function RecordsView({ data }: { data: RecordsData }) {
   const view = useStore(viewStore);
   const selection = useStore(selectionStore);
   const pending = useMemo(() => new Set(data.scan.pending), [data]);
-  const now = useNow();
   const warn = +data.settings.expiry_warn_days || 14;
   const f = view.filters;
   const zone = data.zone;
@@ -412,9 +420,7 @@ function RecordsView({ data }: { data: RecordsData }) {
           <button type="button" className="linkbtn" onClick={() => viewStore.set((v) => ({ ...v, byTarget: !v.byTarget }))}>
             {view.byTarget ? '改為清單檢視' : '依目標分組'}
           </button>
-          <span className="small muted" tabIndex={0} data-tip={syncedTip(data.synced_at)}>
-            更新於 {relTime(data.synced_at, now)}
-          </span>
+          <SyncedAt at={data.synced_at} />
           <button
             type="button"
             className="btn"

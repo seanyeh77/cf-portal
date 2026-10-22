@@ -40,7 +40,7 @@ type Client struct {
 	http     *http.Client
 
 	mu       sync.Mutex
-	zoneMu   sync.Mutex // serializes the zone id lookup
+	zoneMu   sync.Mutex // serializes the zone id lookup on a cache miss
 	zoneID   string
 	cache    []model.Record
 	cachedAt time.Time
@@ -117,12 +117,17 @@ func (c *Client) do(ctx context.Context, method, path string, body any) (*envelo
 
 // ZoneID resolves and caches the zone id.
 func (c *Client) ZoneID(ctx context.Context) (string, error) {
+	cached := func() string {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return c.zoneID
+	}
+	if id := cached(); id != "" {
+		return id, nil
+	}
 	c.zoneMu.Lock()
 	defer c.zoneMu.Unlock()
-	c.mu.Lock()
-	id := c.zoneID
-	c.mu.Unlock()
-	if id != "" {
+	if id := cached(); id != "" {
 		return id, nil
 	}
 	env, err := c.do(ctx, http.MethodGet, "/zones?name="+url.QueryEscape(c.zoneName), nil)

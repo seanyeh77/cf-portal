@@ -300,17 +300,20 @@ func (s *Store) PutScan(ctx context.Context, id string, ts float64, reachable bo
 	return err
 }
 
-// PruneScans deletes scan rows whose record id is not in keep.
-func (s *Store) PruneScans(ctx context.Context, keep map[string]bool) error {
-	ids := make([]any, 0, len(keep))
+// PruneScans deletes scan rows written before ts whose record id is not in
+// keep. Rows written later (records created or re-enabled while a full scan
+// ran) are kept.
+func (s *Store) PruneScans(ctx context.Context, keep map[string]bool, ts float64) error {
+	ids := make([]any, 0, len(keep)+1)
+	ids = append(ids, ts)
 	marks := make([]string, 0, len(keep))
 	for id := range keep {
 		ids = append(ids, id)
 		marks = append(marks, "?")
 	}
-	q := "DELETE FROM record_scan"
-	if len(ids) > 0 {
-		q += " WHERE record_id NOT IN (" + strings.Join(marks, ",") + ")"
+	q := "DELETE FROM record_scan WHERE last_ts < ?"
+	if len(marks) > 0 {
+		q += " AND record_id NOT IN (" + strings.Join(marks, ",") + ")"
 	}
 	_, err := s.db.ExecContext(ctx, q, ids...)
 	return err

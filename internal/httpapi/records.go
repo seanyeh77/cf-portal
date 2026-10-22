@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"maps"
 	"net/http"
@@ -195,17 +196,14 @@ func (s *Server) checkConflict(ctx context.Context, in model.RecordInput, exclud
 	return dnsrec.Conflict(in, recs, exclude)
 }
 
-// prepareCreate validates a new record and its meta and checks the record
-// against existing (batch passes its earlier rows as well).
-func (s *Server) prepareCreate(in model.RecordInput, meta model.Meta, existing []model.Record) (model.RecordInput, model.Meta, error) {
+// prepareCreate validates a new record and its meta. Conflicts are checked
+// separately, against the zone or (in a batch) the zone plus earlier rows.
+func (s *Server) prepareCreate(in model.RecordInput, meta model.Meta) (model.RecordInput, model.Meta, error) {
 	if err := dnsrec.Validate(&in, s.Cfg.CFZoneName); err != nil {
 		return in, meta, err
 	}
 	meta, err := cleanMeta(meta)
-	if err != nil {
-		return in, meta, err
-	}
-	return in, meta, dnsrec.Conflict(in, existing, "")
+	return in, meta, err
 }
 
 // commitCreate creates a prepared record, stores its meta and audits it.
@@ -225,14 +223,14 @@ func (s *Server) commitCreate(r *http.Request, in model.RecordInput, meta model.
 	return rec, nil
 }
 
-// createRecord prepares, commits and queues a connection check for one
-// record, reporting whether a check was queued.
+// createRecord prepares, conflict-checks, commits and queues a connection
+// check for one record, reporting whether a check was queued.
 func (s *Server) createRecord(r *http.Request, in model.RecordInput, meta model.Meta, action string, extra map[string]any) (*model.Record, bool, error) {
-	existing, _, err := s.CF.List(r.Context(), true)
-	if err != nil {
-		return nil, false, err
+	in, meta, err := s.prepareCreate(in, meta)
+	if err == nil {
+		err = s.checkConflict(r.Context(), in, "")
 	}
-	if in, meta, err = s.prepareCreate(in, meta, existing); err != nil {
+	if err != nil {
 		return nil, false, err
 	}
 	rec, err := s.commitCreate(r, in, meta, action, extra)
@@ -244,7 +242,9 @@ func (s *Server) createRecord(r *http.Request, in model.RecordInput, meta model.
 
 // updateRecord writes a validated DNS change and the new meta, audits both
 // as action and then queues the checks. Nothing is written when the
-// conflict check or Cloudflare rejects the change.
+// conflict check or Cloudflare rejects the change. If the meta cannot be
+// saved after Cloudflare accepted the change, the audit records only the
+// DNS change and the error says so.
 func (s *Server) updateRecord(r *http.Request, cur model.Record, in model.RecordInput, metaBefore, metaAfter model.Meta, action string) (*model.Record, bool, error) {
 	ctx := r.Context()
 	if err := s.checkConflict(ctx, in, cur.ID); err != nil {
@@ -255,11 +255,13 @@ func (s *Server) updateRecord(r *http.Request, cur model.Record, in model.Record
 		return nil, false, err
 	}
 	d := map[string]any{"record_id": cur.ID, "before": cur.Input(), "after": rec.Input()}
+	var metaErr error
 	if metaAfter != metaBefore {
-		if err := s.Store.PutMeta(ctx, cur.ID, metaAfter); err != nil {
-			log.Printf("put meta %s: %v", rec.Name, err)
+		if metaErr = s.Store.PutMeta(ctx, cur.ID, metaAfter); metaErr == nil {
+			d["meta_before"], d["meta_after"] = metaBefore, metaAfter
+		} else {
+			metaErr = fmt.Errorf("DNS 已更新，但管理資訊未儲存：%w", metaErr)
 		}
-		d["meta_before"], d["meta_after"] = metaBefore, metaAfter
 	}
 	if !strings.EqualFold(cur.Name, rec.Name) {
 		s.Store.SetListingHostname(ctx, cur.ID, rec.Name)
@@ -268,22 +270,33 @@ func (s *Server) updateRecord(r *http.Request, cur model.Record, in model.Record
 	if l, err := s.Store.Listing(ctx, cur.ID); err == nil {
 		s.Health.CheckSoon(*l)
 	}
-	return rec, s.Scanner.ScanSoon(*rec), nil
+	return rec, s.Scanner.ScanSoon(*rec), metaErr
 }
 
-// putMeta replaces a record's meta, audits the change as meta_update and
-// reports whether re-enabling the check queued a scan.
-func (s *Server) putMeta(r *http.Request, rec model.Record, before, after model.Meta, extra map[string]any) (bool, error) {
+// putMeta replaces a record's meta and audits the change as meta_update.
+// It reports whether the connection check was re-enabled, in which case
+// the caller queues a scan.
+func (s *Server) putMeta(r *http.Request, id, name string, before, after model.Meta, extra map[string]any) (bool, error) {
 	if after == before {
 		return false, nil
 	}
-	if err := s.Store.PutMeta(r.Context(), rec.ID, after); err != nil {
+	if err := s.Store.PutMeta(r.Context(), id, after); err != nil {
 		return false, err
 	}
-	d := map[string]any{"record_id": rec.ID, "meta_before": before, "meta_after": after}
+	d := map[string]any{"record_id": id, "meta_before": before, "meta_after": after}
 	maps.Copy(d, extra)
-	s.auditLog(r, "meta_update", rec.Name, d)
-	return before.NoScan && !after.NoScan && s.Scanner.ScanSoon(rec), nil
+	s.auditLog(r, "meta_update", name, d)
+	return before.NoScan && !after.NoScan, nil
+}
+
+// nextMeta loads a record's meta and returns it with change applied and
+// validated.
+func (s *Server) nextMeta(ctx context.Context, id string, change func(model.Meta) model.Meta) (before, after model.Meta, err error) {
+	if before, err = s.Store.Meta(ctx, id); err != nil {
+		return
+	}
+	after, err = cleanMeta(change(before))
+	return
 }
 
 // ---- create / update / delete ----
@@ -376,23 +389,23 @@ func (s *Server) apiUpdateRecord(w http.ResponseWriter, r *http.Request) {
 		// Normalization can turn a sent change back into the current value.
 		dnsChanged = len(model.ChangedFields(in, before)) > 0
 	}
-	metaBefore, err := s.Store.Meta(ctx, id)
+	change := func(m model.Meta) model.Meta { return m }
+	if b.Meta != nil {
+		change = b.Meta.Apply
+	}
+	metaBefore, metaAfter, err := s.nextMeta(ctx, id, change)
 	if err != nil {
 		writeAnyErr(w, err)
 		return
-	}
-	metaAfter := metaBefore
-	if b.Meta != nil {
-		if metaAfter, err = cleanMeta(b.Meta.Apply(metaBefore)); err != nil {
-			writeAnyErr(w, err)
-			return
-		}
 	}
 	rec, scanning := cur, false
 	if dnsChanged {
 		rec, scanning, err = s.updateRecord(r, *cur, in, metaBefore, metaAfter, "record_update")
 	} else {
-		scanning, err = s.putMeta(r, *cur, metaBefore, metaAfter, nil)
+		var rescan bool
+		if rescan, err = s.putMeta(r, id, cur.Name, metaBefore, metaAfter, nil); rescan {
+			scanning = s.Scanner.ScanSoon(*cur)
+		}
 	}
 	if err != nil {
 		writeAnyErr(w, err)
@@ -472,28 +485,26 @@ func (s *Server) apiPutMeta(w http.ResponseWriter, r *http.Request) {
 	s.replaceMeta(w, r, r.PathValue("id"), p.Apply, nil)
 }
 
-// replaceMeta applies change to a record's meta and saves it.
+// replaceMeta applies change to a record's meta and saves it. Meta is local
+// data, so Cloudflare is only asked for the record when a scan must be
+// queued.
 func (s *Server) replaceMeta(w http.ResponseWriter, r *http.Request, id string, change func(model.Meta) model.Meta, extra map[string]any) {
 	ctx := r.Context()
-	rec, err := s.CF.Get(ctx, id)
+	before, after, err := s.nextMeta(ctx, id, change)
 	if err != nil {
 		writeAnyErr(w, err)
 		return
 	}
-	before, err := s.Store.Meta(ctx, id)
+	rescan, err := s.putMeta(r, id, s.recordName(ctx, id), before, after, extra)
 	if err != nil {
 		writeAnyErr(w, err)
 		return
 	}
-	after, err := cleanMeta(change(before))
-	if err != nil {
-		writeAnyErr(w, err)
-		return
-	}
-	scanning, err := s.putMeta(r, *rec, before, after, extra)
-	if err != nil {
-		writeAnyErr(w, err)
-		return
+	scanning := false
+	if rescan {
+		if rec, err := s.CF.Get(ctx, id); err == nil {
+			scanning = s.Scanner.ScanSoon(*rec)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"meta": after, "scanning": scanning})
 }
@@ -657,7 +668,10 @@ func (s *Server) apiBatch(w http.ResponseWriter, r *http.Request) {
 		if row.Meta != nil {
 			meta = *row.Meta
 		}
-		in, meta, err := s.prepareCreate(row.RecordInput, meta, pseudo)
+		in, meta, err := s.prepareCreate(row.RecordInput, meta)
+		if err == nil {
+			err = dnsrec.Conflict(in, pseudo, "")
+		}
 		res := batchResult{Index: i, Type: in.Type, Name: in.Name, Content: in.Content}
 		if err != nil {
 			res.Error = err.Error()
@@ -756,17 +770,14 @@ func (s *Server) restoreRevert(w http.ResponseWriter, r *http.Request, b restore
 		writeAnyErr(w, err)
 		return
 	}
-	metaBefore, err := s.Store.Meta(ctx, b.RecordID)
+	change := func(m model.Meta) model.Meta { return m }
+	if b.Meta != nil {
+		change = func(model.Meta) model.Meta { return *b.Meta }
+	}
+	metaBefore, metaAfter, err := s.nextMeta(ctx, b.RecordID, change)
 	if err != nil {
 		writeAnyErr(w, err)
 		return
-	}
-	metaAfter := metaBefore
-	if b.Meta != nil {
-		if metaAfter, err = cleanMeta(*b.Meta); err != nil {
-			writeAnyErr(w, err)
-			return
-		}
 	}
 	rec, _, err := s.updateRecord(r, *cur, in, metaBefore, metaAfter, "record_restore")
 	if err != nil {
@@ -797,8 +808,7 @@ func (s *Server) restoreMeta(w http.ResponseWriter, r *http.Request, b restoreBo
 		writeErr(w, http.StatusUnprocessableEntity, "缺少還原資料")
 		return
 	}
-	meta := *b.Meta
-	s.replaceMeta(w, r, b.RecordID, func(model.Meta) model.Meta { return meta }, map[string]any{"restore": true})
+	s.replaceMeta(w, r, b.RecordID, func(model.Meta) model.Meta { return *b.Meta }, map[string]any{"restore": true})
 }
 
 func (s *Server) apiMute(w http.ResponseWriter, r *http.Request) {

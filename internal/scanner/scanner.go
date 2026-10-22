@@ -216,6 +216,7 @@ func (s *Scanner) scanEach(ctx context.Context, recs []model.Record, ports []int
 }
 
 func (s *Scanner) scanAll(ctx context.Context) (int, bool, error) {
+	start := float64(time.Now().Unix())
 	recs, _, err := s.CF.List(ctx, true)
 	if err != nil {
 		return 0, s.Status().DNSOK, err
@@ -234,13 +235,7 @@ func (s *Scanner) scanAll(ctx context.Context) (int, bool, error) {
 	}
 	dnsOK := s.dnsWorks(ctx)
 	s.scanEach(ctx, todo, s.Ports(ctx), dnsOK)
-	// Records created after the list was taken may have results already.
-	s.mu.Lock()
-	for id := range s.inflight {
-		keep[id] = true
-	}
-	s.mu.Unlock()
-	return len(todo), dnsOK, s.Store.PruneScans(ctx, keep)
+	return len(todo), dnsOK, s.Store.PruneScans(ctx, keep, start)
 }
 
 // ScanSoon scans the given records in the background and reports whether

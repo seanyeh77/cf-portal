@@ -65,3 +65,22 @@ func TestMetaAndForget(t *testing.T) {
 		t.Fatal("defaults")
 	}
 }
+
+func TestPruneScansKeepsNewerRows(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "p.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	s.PutScan(ctx, "kept", 100, true, "", "", "", "")
+	s.PutScan(ctx, "stale", 100, true, "", "", "", "")
+	s.PutScan(ctx, "new", 200, true, "", "", "", "") // written while the scan ran
+	if err := s.PruneScans(ctx, map[string]bool{"kept": true}, 150); err != nil {
+		t.Fatal(err)
+	}
+	scans, _ := s.AllScans(ctx)
+	if _, ok := scans["stale"]; ok || len(scans) != 2 {
+		t.Fatalf("after prune: %v", scans)
+	}
+}

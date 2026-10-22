@@ -80,8 +80,22 @@ export const selectionStore = createStore<Set<string>>(new Set());
 
 // ---- shared clock for relative times ----
 
-export const nowStore = createStore(Date.now() / 1000);
-window.setInterval(() => nowStore.set(Date.now() / 1000), 30000);
+const nowStore = createStore(Date.now() / 1000);
+let clockSubs = 0;
+let clockTimer = 0;
+
+/** Ticks only while something is subscribed. */
+function subscribeClock(fn: () => void) {
+  const off = nowStore.subscribe(fn);
+  if (clockSubs++ === 0) {
+    nowStore.set(Date.now() / 1000);
+    clockTimer = window.setInterval(() => nowStore.set(Date.now() / 1000), 30000);
+  }
+  return () => {
+    off();
+    if (--clockSubs === 0) window.clearInterval(clockTimer);
+  };
+}
 
 /** Seconds since the epoch, updated every 30 s. */
-export const useNow = () => useStore(nowStore);
+export const useNow = () => useSyncExternalStore(subscribeClock, nowStore.get, nowStore.get);
