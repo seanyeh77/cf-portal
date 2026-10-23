@@ -4,7 +4,8 @@ services:
     image: cf-portal:latest
     env_file: .env
     ports:
-      - "8080:8080"
+      # Host address and port, set PORTAL_BIND / PORTAL_PORT in .env.
+      - "${PORTAL_BIND:-0.0.0.0}:${PORTAL_PORT:-8080}:8080"
     volumes:
       - portal-data:/data
     restart: unless-stopped

@@ -25,7 +25,7 @@ docker compose up -d --build
 docker compose ps        # STATUS 應為 healthy
 ```
 
-服務監聽 container 的 8080（compose 對外開放 8080）。以瀏覽器開啟 `https://<主機>/`；管理後台為 `/admin`。
+服務監聽 container 的 8080，compose 預設對外開放主機的 8080；要改用其他埠，在 `.env` 設定 `PORTAL_PORT`（例如 `PORTAL_PORT=9000`），只想讓本機 reverse proxy 連線時設 `PORTAL_BIND=127.0.0.1`。以瀏覽器開啟 `https://<主機>/`；管理後台為 `/admin`。
 
 ## 2. 建立 Cloudflare API token
 
@@ -123,6 +123,8 @@ docker compose start portal
 
 | 變數 | 預設 | 說明 |
 |---|---|---|
+| `PORTAL_PORT` | `8080` | compose 對外開放的主機埠（container 內固定為 8080） |
+| `PORTAL_BIND` | `0.0.0.0` | compose 對外開放的主機位址；`127.0.0.1` 只允許本機連線 |
 | `CF_API_TOKEN` | 必填 | Cloudflare API token（Zone.DNS:Edit、Zone.Zone:Read，限定此 zone） |
 | `CF_ZONE_NAME` | 必填 | 管理的 zone，例如 `example.org` |
 | `CF_ZONE_ID` | 空 | 選填；有設就不用名稱查 zone id |
@@ -147,7 +149,7 @@ docker compose start portal
 | `MAINT_INTERVAL` | `3600` | 例行作業（每日快照、到期刪除）間隔（秒） |
 | `SNAPSHOT_KEEP` | `30` | 保留幾份自動快照（手動快照不會自動刪除） |
 | `TIMEZONE` | `Asia/Taipei` | 判斷「今天」與到期日用 |
-| `LISTEN_ADDR` | `:8080` | 監聽位址 |
+| `LISTEN_ADDR` | `:8080` | container 內的監聽位址；使用 compose 時請勿修改，改用 `PORTAL_PORT` |
 
 啟動時會檢查必填變數、CIDR 格式與時區，錯誤時印出所有問題並結束。
 
