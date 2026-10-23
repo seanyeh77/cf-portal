@@ -33,9 +33,12 @@ var Kinds = []Kind{
 	{"bad_target", High, "CNAME 目標無效", "CNAME 須指向完整網域，不可為 localhost、IP 位址或不含網域的名稱。請改為正確的目標或刪除此 record。"},
 	{"loopback", High, "指向本機位址", "127.0.0.1、::1、0.0.0.0 只代表使用者自己的電腦，無法連到伺服器。請改為正確的 IP 或刪除此 record。"},
 	{"dangling", High, "CNAME 目標不存在", "目標網域已不存在，第三方可註冊該網域並接管此子網域。若服務已停用，請刪除此 record。"},
+	{"tunnel_missing", High, "Tunnel 不存在", "指向的 Cloudflare Tunnel 已刪除或不屬於此帳號，連線會出現錯誤 1033。請改指向現有的 tunnel，或刪除此 record。"},
+	{"tunnel_unproxied", High, "Tunnel 未啟用 Proxy", "Tunnel 的位址只在 Cloudflare 內部有效，未啟用 Proxy 時外部無法連線。請啟用 Proxy。"},
 	{"unclaimed", High, "CNAME 目標未使用", "託管服務回報此網址無對應站台，第三方可能認領並接管此子網域。請刪除此 record 或重建站台。"},
 	{"expired", High, "已過期", "已超過到期日。請確認後刪除，或延後到期日。"},
 	{"upstream_broken", Medium, "受上游影響", "此 CNAME 指向本網域另一筆無法使用的 record。請先修正上游 record，修正後此項會自動解除。"},
+	{"tunnel_down", Medium, "Tunnel 離線", "Tunnel 目前沒有任何 cloudflared 連線，經由它的服務都無法使用。請檢查執行 cloudflared 的主機。"},
 	{"zombie", Medium, "長期無回應", "連續多日無任何回應，服務可能已停用。請與負責人確認；非常態開機的主機可停用連線檢查。"},
 	{"proxied_private", Medium, "內網位址啟用 Proxy", "Cloudflare 無法連線至內網位址。請停用 Proxy。"},
 	{"expiring", Medium, "即將到期", "即將到達到期日。如需繼續使用，請延後到期日。"},
@@ -65,7 +68,8 @@ var kindOrder = func() map[string]int {
 }()
 
 // brokenKinds make a record unusable for CNAMEs pointing at it.
-var brokenKinds = map[string]bool{"bad_target": true, "loopback": true, "dangling": true, "unclaimed": true}
+var brokenKinds = map[string]bool{"bad_target": true, "loopback": true, "dangling": true, "unclaimed": true,
+	"tunnel_missing": true, "tunnel_unproxied": true}
 
 // Issue is one problem found on a record.
 type Issue struct {
@@ -86,11 +90,14 @@ type Settings struct {
 
 // Input is everything the analysis looks at.
 type Input struct {
-	Zone     string
-	Records  []model.Record
-	Meta     map[string]model.Meta
-	Scans    map[string]model.Scan
-	Mutes    map[string]map[string]bool
+	Zone    string
+	Records []model.Record
+	Meta    map[string]model.Meta
+	Scans   map[string]model.Scan
+	Mutes   map[string]map[string]bool
+	// Tunnels are the account's tunnels by lower-case id; nil when unknown
+	// (the token lacks the permission), which skips the tunnel state rules.
+	Tunnels  map[string]model.Tunnel
 	Settings Settings
 	Now      time.Time
 	Loc      *time.Location
@@ -161,6 +168,14 @@ func hasPort(ports string, want ...string) bool {
 	return false
 }
 
+// tunnelLabel names a tunnel for issue details.
+func tunnelLabel(t model.Tunnel, id string) string {
+	if t.Name != "" {
+		return t.Name + "（" + id[:8] + "）"
+	}
+	return id
+}
+
 // AddDays adds n days to a YYYY-MM-DD date.
 func AddDays(day string, n int) string {
 	t, err := time.Parse("2006-01-02", day)
@@ -214,7 +229,25 @@ func Analyze(in Input) *Result {
 		if isAddr && dnsrec.IsLocalAddr(addr) {
 			add(r.ID, "loopback", addr.String())
 		}
-		if r.Type == "CNAME" && scanned && !badTarget {
+		tunnel := ""
+		if r.Type == "CNAME" {
+			tunnel = dnsrec.TunnelID(target)
+		}
+		if tunnel != "" {
+			if !r.Proxied {
+				add(r.ID, "tunnel_unproxied", "")
+			}
+			if in.Tunnels != nil {
+				switch t, ok := in.Tunnels[tunnel]; {
+				case !ok || t.Deleted:
+					add(r.ID, "tunnel_missing", tunnelLabel(t, tunnel))
+				case t.Status == "down" || t.Status == "inactive":
+					add(r.ID, "tunnel_down", tunnelLabel(t, tunnel))
+				}
+			}
+		}
+		// Tunnel targets never resolve publicly, so DNS results say nothing.
+		if r.Type == "CNAME" && scanned && !badTarget && tunnel == "" {
 			if scan.DNSStatus == "nxdomain" && len(byName[target]) == 0 {
 				d := scan.DNSDetail
 				if d == "" {
@@ -281,8 +314,9 @@ func Analyze(in Input) *Result {
 				}
 			}
 		}
-		// TargetKey is "" for other types, and "" is never collected.
-		if k := TargetKey(r); len(targets[k]) >= 2 {
+		// TargetKey is "" for other types, and "" is never collected. One
+		// tunnel normally serves many names.
+		if k := TargetKey(r); len(targets[k]) >= 2 && tunnel == "" {
 			add(r.ID, "shared_target", fmt.Sprintf("%d 筆指向 %s", len(targets[k]), k))
 		}
 	}

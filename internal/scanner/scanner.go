@@ -307,6 +307,16 @@ func (s *Scanner) Scan(ctx context.Context, r model.Record, ports []int, dnsOK b
 	switch r.Type {
 	case "CNAME":
 		target := dnsrec.NormalizeTarget(r.Content)
+		if dnsrec.TunnelID(target) != "" {
+			// Resolvable only inside Cloudflare; only the proxied name can be probed.
+			res.DNSStatus = "tunnel"
+			res.DNSDetail = "Cloudflare Tunnel"
+			if !r.Proxied {
+				res.Detail = "Tunnel 須啟用 Proxy 才能連線"
+				return res
+			}
+			break
+		}
 		c, cancel := context.WithTimeout(ctx, s.Timeout*2)
 		got, err := s.Resolver.LookupHost(c, target)
 		cancel()

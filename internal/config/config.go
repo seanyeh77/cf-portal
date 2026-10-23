@@ -21,6 +21,7 @@ type Config struct {
 	CFAPIToken        string
 	CFZoneName        string
 	CFZoneID          string
+	CFAccountID       string
 	CFAPIBase         string
 	AdminUsername     string
 	AdminPasswordHash string
@@ -146,6 +147,7 @@ func Load(getenv func(string) string) (*Config, error) {
 		CFAPIToken:        r.required("CF_API_TOKEN"),
 		CFZoneName:        strings.TrimSuffix(strings.ToLower(r.required("CF_ZONE_NAME")), "."),
 		CFZoneID:          r.str("CF_ZONE_ID", ""),
+		CFAccountID:       r.str("CF_ACCOUNT_ID", ""),
 		CFAPIBase:         strings.TrimSuffix(r.str("CF_API_BASE", "https://api.cloudflare.com/client/v4"), "/"),
 		AdminUsername:     r.str("ADMIN_USERNAME", "admin"),
 		AdminPasswordHash: r.required("ADMIN_PASSWORD_HASH"),

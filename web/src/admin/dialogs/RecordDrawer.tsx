@@ -4,7 +4,7 @@ import { fmtDateTimeShort, relTime } from '../../shared/format';
 import { confirmDialog, Dialog, Tip } from '../../shared/ui';
 import { act } from '../lib/data';
 import { ACTION_LABEL, restorePlan, summarize } from '../lib/audit';
-import { dependents, LEVEL_NAME, SCANNABLE, statusIssues, sub, ttlLabel } from '../lib/records';
+import { dependents, LEVEL_NAME, SCANNABLE, statusIssues, sub, ttlLabel, tunnelStatus } from '../lib/records';
 import { drawerStore, modalStore, openDrawer, openEditor } from '../lib/store';
 import type { AuditEntry, DNSRecord, RecordsData } from '../types';
 
@@ -171,6 +171,12 @@ export function RecordDrawer({ r, data }: { r: DNSRecord; data: RecordsData }) {
           <Def k="指向">
             <span className="mono wrap-any">{r.content}</span>
           </Def>
+          {r.tunnel && (
+            <Def k="Tunnel">
+              {r.tunnel.name ? <span className="mono">{r.tunnel.name}</span> : <span className="muted">名稱未知</span>}
+              {tunnelStatus(r.tunnel) && `（${tunnelStatus(r.tunnel)}）`}
+            </Def>
+          )}
           {r.priority != null && <Def k="Priority">{r.priority}</Def>}
           <Def k="Proxy">{r.proxied ? '啟用' : '停用'}</Def>
           <Def k="TTL">{ttlLabel(r.ttl)}</Def>

@@ -472,6 +472,10 @@
   font-weight: 600;
   font-size: 13px;
 }
+.group-head .group-edit {
+  margin-left: 12px;
+  font-weight: 400;
+}
 .empty {
   text-align: center;
   color: var(--muted);

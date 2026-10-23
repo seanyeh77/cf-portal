@@ -120,7 +120,7 @@ func serve() error {
 	defer st.Close()
 	st.Defaults = store.DefaultSettings(cfg.PortalTitle)
 
-	cf := cloudflare.New(cfg.CFAPIBase, cfg.CFAPIToken, cfg.CFZoneName, cfg.CFZoneID)
+	cf := cloudflare.New(cfg.CFAPIBase, cfg.CFAPIToken, cfg.CFZoneName, cfg.CFZoneID, cfg.CFAccountID)
 	snaps := &snapshots.Store{Dir: st.Dir + "/snapshots", Loc: cfg.Timezone}
 	icons := assets.NewFetcher(st.Dir+"/icons", cfg.SimpleIconsBase, cfg.CheckTimeout*2, cfg.CheckVerifyTLS)
 	hc := health.New(st, cfg.CheckInterval, cfg.CheckTimeout, cfg.CheckVerifyTLS)

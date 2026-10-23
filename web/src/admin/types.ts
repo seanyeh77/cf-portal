@@ -58,7 +58,11 @@ export type DNSRecord = RecordInput & {
   scan: Scan | null;
   issues: Issue[];
   muted: Issue[];
+  /** Set on CNAMEs to a Cloudflare Tunnel; name and status are '' when unknown. */
+  tunnel?: Tunnel;
 };
+
+export type Tunnel = { id: string; name: string; status: string; deleted: boolean };
 
 export type Kind = { level: Level; label: string; help: string };
 
@@ -87,6 +91,8 @@ export type RecordsData = {
   scan: ScanStatus;
   pending_requests: number;
   last_snapshot: number;
+  /** Why tunnel names and states are unavailable, or ''. */
+  tunnel_error: string;
   settings: {
     zombie_days: string;
     expiry_warn_days: string;

@@ -35,9 +35,20 @@ Cloudflare 控制台 → My Profile → API Tokens → Create Token → Custom t
 |---|---|
 | Zone · DNS | Edit |
 | Zone · Zone | Read |
+| Account · Cloudflare Tunnel | Read（選用） |
 
-Zone Resources 選 **Include · Specific zone · example.org**，不要授權其他 zone。可加上 Client IP Address Filtering 限定這台主機的對外 IP。
+Zone Resources 選 **Include · Specific zone · example.org**，不要授權其他 zone；若加了 Tunnel 權限，Account Resources 選 **Include · 該 zone 所屬帳號**。可加上 Client IP Address Filtering 限定這台主機的對外 IP。
 若想省去啟動時以名稱查詢 zone id，可在 Overview 頁右下角複製 Zone ID 填入 `CF_ZONE_ID`。
+
+### Cloudflare Tunnel
+
+指向 `<tunnel UUID>.cfargotunnel.com` 的 CNAME 會被辨識為 Cloudflare Tunnel 路由。這類位址只在 Cloudflare 內部有效，公開 DNS 查不到，因此不做 DNS 解析，也不視為「CNAME 目標不存在」；同一條 tunnel 服務多個名稱也不列為「目標重複」。
+
+- 未啟用 Proxy 的 tunnel record 列為「緊急：Tunnel 未啟用 Proxy」，因為外部無法連線。
+- token 具備 **Account · Cloudflare Tunnel · Read** 時，後台會顯示 tunnel 名稱與狀態，並在 tunnel 已刪除時列為「緊急：Tunnel 不存在」，沒有任何 cloudflared 連線時列為「注意：Tunnel 離線」。
+- 沒有這項權限時，後台以 UUID 前 8 碼代表 tunnel，並在 DNS Records 頁提示缺少權限；其餘功能不受影響。
+- 帳號 ID 由 zone 自動取得，必要時可用 `CF_ACCOUNT_ID` 指定。
+- 「依目標分組」會把同一條 tunnel 的 record 排在一起，可用「設定此組管理資訊」一次指派負責人與用途。
 
 ## 3. 密碼雜湊與 SECRET_KEY
 
@@ -125,9 +136,10 @@ docker compose start portal
 |---|---|---|
 | `PORTAL_PORT` | `8080` | compose 對外開放的主機埠（container 內固定為 8080） |
 | `PORTAL_BIND` | `0.0.0.0` | compose 對外開放的主機位址；`127.0.0.1` 只允許本機連線 |
-| `CF_API_TOKEN` | 必填 | Cloudflare API token（Zone.DNS:Edit、Zone.Zone:Read，限定此 zone） |
+| `CF_API_TOKEN` | 必填 | Cloudflare API token（Zone.DNS:Edit、Zone.Zone:Read，限定此 zone；選用 Account.Cloudflare Tunnel:Read） |
 | `CF_ZONE_NAME` | 必填 | 管理的 zone，例如 `example.org` |
 | `CF_ZONE_ID` | 空 | 選填；有設就不用名稱查 zone id |
+| `CF_ACCOUNT_ID` | 空 | 選填；讀取 Cloudflare Tunnel 用的帳號 ID，預設由 zone 取得 |
 | `CF_API_BASE` | `https://api.cloudflare.com/client/v4` | 測試時改指向模擬伺服器 |
 | `ADMIN_USERNAME` | `admin` | 管理者帳號 |
 | `ADMIN_PASSWORD_HASH` | 必填 | `portal hashpw` 產生 |

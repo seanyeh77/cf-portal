@@ -21,9 +21,27 @@ import (
 
 // Zone is the mocked zone name.
 const (
-	Zone   = "example.org"
-	ZoneID = "023e105f4ecef8ad9ca31a8372d0c353"
+	Zone      = "example.org"
+	ZoneID    = "023e105f4ecef8ad9ca31a8372d0c353"
+	AccountID = "01a7362d577a6c3019a474fd6f485823"
 )
+
+// Seeded tunnels: one healthy, one down and one deleted. TunnelGone is
+// absent from the account entirely.
+const (
+	TunnelOK      = "6ff42ae2-765d-4adf-8112-31c55c1551ef"
+	TunnelDown    = "1f2a3b4c-0000-4000-8000-00000000d0d0"
+	TunnelDeleted = "9e8d7c6b-0000-4000-8000-0000000de1e7"
+	TunnelGone    = "00000000-dead-4bad-8bad-000000000000"
+)
+
+// Tunnel mirrors the Cloudflare Tunnel object.
+type Tunnel struct {
+	ID        string  `json:"id"`
+	Name      string  `json:"name"`
+	Status    string  `json:"status"`
+	DeletedAt *string `json:"deleted_at"`
+}
 
 // Record mirrors the Cloudflare record object.
 type Record struct {
@@ -45,8 +63,13 @@ type Server struct {
 	Token      string
 	MaxPerPage int
 
+	// tunnelsForbidden answers the tunnel list with 403, like a token
+	// without the Cloudflare Tunnel permission.
+	tunnelsForbidden bool
+
 	mu      sync.Mutex
 	records []*Record
+	tunnels []Tunnel
 	// Calls counts mutating calls, keyed by method.
 	Calls map[string]int
 }
@@ -88,6 +111,9 @@ func Seed() []*Record {
 		mk("A", "Old_Box", "10.0.2.5", false),
 		mk("MX", "@", "mail.example.com", false),
 		mk("SRV", "_minecraft._tcp", "0 25565 mc.example.org", false),
+		mk("CNAME", "tun-app", TunnelOK+".cfargotunnel.com", true),
+		mk("CNAME", "tun-wiki", TunnelOK+".cfargotunnel.com", true),
+		mk("CNAME", "tun-gone", TunnelGone+".cfargotunnel.com", true),
 	}
 	recs[0].TTL = 300
 	recs[11].Priority = new(10)
@@ -107,6 +133,13 @@ func (s *Server) Reset() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.records = Seed()
+	deleted := "2026-02-01T00:00:00Z"
+	s.tunnels = []Tunnel{
+		{ID: TunnelOK, Name: "home-lab", Status: "healthy"},
+		{ID: TunnelDown, Name: "old-lab", Status: "down"},
+		{ID: TunnelDeleted, Name: "retired", Status: "inactive", DeletedAt: &deleted},
+	}
+	s.tunnelsForbidden = false
 	s.Calls = map[string]int{}
 }
 
@@ -155,6 +188,17 @@ func ok(w http.ResponseWriter, result any, info any) {
 	writeJSON(w, http.StatusOK, body)
 }
 
+func zoneObj() map[string]any {
+	return map[string]any{"id": ZoneID, "name": Zone, "account": map[string]string{"id": AccountID, "name": "Example"}}
+}
+
+// SetTunnelsForbidden toggles the 403 answer of the tunnel list.
+func (s *Server) SetTunnelsForbidden(v bool) {
+	s.mu.Lock()
+	s.tunnelsForbidden = v
+	s.mu.Unlock()
+}
+
 // ServeHTTP implements http.Handler.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path
@@ -181,9 +225,27 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		name := r.URL.Query().Get("name")
 		res := []any{}
 		if name == "" || name == Zone {
-			res = append(res, map[string]string{"id": ZoneID, "name": Zone})
+			res = append(res, zoneObj())
 		}
 		ok(w, res, map[string]int{"page": 1, "total_pages": 1, "count": len(res)})
+	case len(parts) == 2 && parts[0] == "zones" && r.Method == http.MethodGet:
+		if parts[1] != ZoneID {
+			fail(w, http.StatusNotFound, 7003, "Could not route to /zones/"+parts[1])
+			return
+		}
+		ok(w, zoneObj(), nil)
+	case len(parts) == 3 && parts[0] == "accounts" && parts[2] == "cfd_tunnel" && r.Method == http.MethodGet:
+		s.mu.Lock()
+		forbidden, ts := s.tunnelsForbidden, append([]Tunnel(nil), s.tunnels...)
+		s.mu.Unlock()
+		switch {
+		case forbidden:
+			fail(w, http.StatusForbidden, 10000, "Authentication error")
+		case parts[1] != AccountID:
+			fail(w, http.StatusNotFound, 7003, "Could not route to /accounts/"+parts[1])
+		default:
+			ok(w, ts, map[string]int{"page": 1, "total_pages": 1, "count": len(ts)})
+		}
 	case len(parts) >= 3 && parts[0] == "zones" && parts[2] == "dns_records":
 		if parts[1] != ZoneID {
 			fail(w, http.StatusNotFound, 7003, "Could not route to /zones/"+parts[1])

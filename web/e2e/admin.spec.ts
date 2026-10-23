@@ -102,6 +102,25 @@ test('CSV import with preview skips duplicates', async ({ page }) => {
   await expect(row(page, 'lab-a')).toContainText('測試, 機器 · 實驗室');
 });
 
+test('tunnel records show the tunnel and can be managed as a group', async ({ page }) => {
+  await openRecords(page);
+  const app = row(page, 'tun-app');
+  await expect(app.locator('td.c-target')).toContainText('Tunnel home-lab');
+  await expect(app.locator('td.c-target')).toContainText('正常 · Proxied');
+  await expect(app.locator('td.c-status')).not.toContainText('CNAME 目標不存在');
+  await expect(row(page, 'tun-gone').locator('td.c-status')).toContainText('緊急：Tunnel 不存在');
+  await page.getByRole('button', { name: '依目標分組' }).click();
+  const head = page.locator('tr.group-head', { hasText: 'Tunnel home-lab（2 筆）' });
+  await head.getByRole('button', { name: '設定此組管理資訊' }).click();
+  const dlg = page.getByTestId('bulk-meta');
+  await dlg.getByLabel('修改用途').check();
+  await dlg.getByLabel('用途', { exact: true }).fill('經 home-lab tunnel');
+  await dlg.getByRole('button', { name: '儲存' }).click();
+  await expect(toast(page, '已更新 2 筆')).toBeVisible();
+  await page.getByRole('button', { name: '改為清單檢視' }).click();
+  await expect(row(page, 'tun-wiki')).toContainText('經 home-lab tunnel');
+});
+
 test('batch assign owners from the banner', async ({ page }) => {
   await openRecords(page);
   const banner = page.locator('.banner');

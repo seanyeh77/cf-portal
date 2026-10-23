@@ -48,6 +48,18 @@ func NormalizeTarget(s string) string {
 	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(s)), ".")
 }
 
+var tunnelRe = regexp.MustCompile(`^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.cfargotunnel\.com$`)
+
+// TunnelID returns the tunnel id of a CNAME target such as
+// <uuid>.cfargotunnel.com, or "" for any other target. Such targets resolve
+// only inside Cloudflare, so they never appear in public DNS.
+func TunnelID(target string) string {
+	if m := tunnelRe.FindStringSubmatch(NormalizeTarget(target)); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
 // Relative returns the part of name in front of the zone ("" for the apex).
 func Relative(name, zone string) string {
 	name = strings.TrimSuffix(strings.ToLower(name), ".")

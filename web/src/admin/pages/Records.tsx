@@ -20,6 +20,8 @@ import {
   sub,
   syncedTip,
   distinctOf,
+  tunnelName,
+  tunnelStatus,
   type SortKey,
 } from '../lib/records';
 import {
@@ -64,6 +66,8 @@ const FIX_LINK: Record<string, Fix> = {
   dangling: editTarget,
   unclaimed: editTarget,
   loopback: editTarget,
+  tunnel_missing: editTarget,
+  tunnel_unproxied: { label: '編輯 Proxy', run: (r) => openEditor(r.id, 'proxied'), needsEditor: true },
   upstream_broken: { label: '前往上游', run: (_, i) => i.upstream && openDrawer(i.upstream), needsEditor: false },
   proxied_private: { label: '編輯 Proxy', run: (r) => openEditor(r.id, 'proxied'), needsEditor: true },
   name_rule: { label: '編輯名稱', run: (r) => openEditor(r.id, 'name'), needsEditor: true },
@@ -241,12 +245,20 @@ const Row = memo(function Row({
       <td className="c-target">
         <div className="target-line">
           <ConnDot r={r} pending={pending} />
-          <span className="mono target" data-tip={r.content.length > 34 ? r.content : undefined}>
-            {r.type === 'MX' && r.priority != null ? `${r.priority} ` : ''}
-            {r.content}
-          </span>
+          {r.tunnel ? (
+            <span className="target" tabIndex={0} data-tip={r.content}>
+              Tunnel <span className="mono">{tunnelName(r.tunnel)}</span>
+            </span>
+          ) : (
+            <span className="mono target" data-tip={r.content.length > 34 ? r.content : undefined}>
+              {r.type === 'MX' && r.priority != null ? `${r.priority} ` : ''}
+              {r.content}
+            </span>
+          )}
         </div>
-        {r.proxied && <div className="small faint proxied">Proxied</div>}
+        {(r.proxied || r.tunnel) && (
+          <div className="small faint proxied">{[r.tunnel && tunnelStatus(r.tunnel), r.proxied && 'Proxied'].filter(Boolean).join(' · ')}</div>
+        )}
       </td>
       <td className="c-status">
         <StatusCell r={r} pending={pending} />
@@ -458,6 +470,8 @@ function RecordsView({ data }: { data: RecordsData }) {
         </div>
       )}
 
+      {data.tunnel_error && <div className="warnbox">注意：{data.tunnel_error}</div>}
+
       {data.orphans.length > 0 && (
         <div className="warnbox">
           下列入口服務的 record 已不存在，請下架：
@@ -582,7 +596,18 @@ function RecordsView({ data }: { data: RecordsData }) {
                     <Fragment key={k}>
                       <tr className="group-head">
                         <td colSpan={cols}>
-                          → <span className="mono">{k}</span>（{rows.length} 筆）
+                          → {rows[0].tunnel ? <>Tunnel <span className="mono">{tunnelName(rows[0].tunnel)}</span></> : <span className="mono">{k}</span>}（{rows.length} 筆）
+                          <button
+                            type="button"
+                            className="linkbtn group-edit"
+                            onClick={() => {
+                              const ids = rows.map((r) => r.id);
+                              selectionStore.set(new Set(ids));
+                              modalStore.set({ kind: 'bulkMeta', ids });
+                            }}
+                          >
+                            設定此組管理資訊
+                          </button>
                         </td>
                       </tr>
                       {rows.map(renderRow)}

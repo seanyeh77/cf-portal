@@ -40,18 +40,23 @@ type Client struct {
 	http     *http.Client
 
 	mu       sync.Mutex
-	zoneMu   sync.Mutex // serializes the zone id lookup on a cache miss
+	zoneMu   sync.Mutex // serializes the zone lookup on a cache miss
 	zoneID   string
+	account  string
 	cache    []model.Record
 	cachedAt time.Time
 	// gen increases on every write, so a List that started before a
 	// write never stores its (stale) result.
 	gen uint64
+
+	tunnelMu sync.Mutex
+	tunnels  tunnelCache
 }
 
-// New returns a client. zoneID may be empty.
-func New(base, token, zoneName, zoneID string) *Client {
-	return &Client{base: strings.TrimSuffix(base, "/"), token: token, zoneName: zoneName, zoneID: zoneID,
+// New returns a client. zoneID and accountID may be empty; they are then
+// looked up from the zone name.
+func New(base, token, zoneName, zoneID, accountID string) *Client {
+	return &Client{base: strings.TrimSuffix(base, "/"), token: token, zoneName: zoneName, zoneID: zoneID, account: accountID,
 		http: &http.Client{Timeout: 30 * time.Second}}
 }
 
@@ -117,34 +122,73 @@ func (c *Client) do(ctx context.Context, method, path string, body any) (*envelo
 
 // ZoneID resolves and caches the zone id.
 func (c *Client) ZoneID(ctx context.Context) (string, error) {
-	cached := func() string {
+	c.mu.Lock()
+	id := c.zoneID
+	c.mu.Unlock()
+	if id != "" {
+		return id, nil
+	}
+	id, _, err := c.zone(ctx)
+	return id, err
+}
+
+// AccountID returns the account that owns the zone.
+func (c *Client) AccountID(ctx context.Context) (string, error) {
+	_, acc, err := c.zone(ctx)
+	return acc, err
+}
+
+// zone resolves and caches the zone id and its account id.
+func (c *Client) zone(ctx context.Context) (string, string, error) {
+	cached := func() (string, string) {
 		c.mu.Lock()
 		defer c.mu.Unlock()
-		return c.zoneID
+		return c.zoneID, c.account
 	}
-	if id := cached(); id != "" {
-		return id, nil
+	if id, acc := cached(); id != "" && acc != "" {
+		return id, acc, nil
 	}
 	c.zoneMu.Lock()
 	defer c.zoneMu.Unlock()
-	if id := cached(); id != "" {
-		return id, nil
+	id, acc := cached()
+	if id != "" && acc != "" {
+		return id, acc, nil
 	}
-	env, err := c.do(ctx, http.MethodGet, "/zones?name="+url.QueryEscape(c.zoneName), nil)
-	if err != nil {
-		return "", err
+	type zoneObj struct {
+		ID      string `json:"id"`
+		Account struct {
+			ID string `json:"id"`
+		} `json:"account"`
 	}
-	var zones []struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-	}
-	if err := json.Unmarshal(env.Result, &zones); err != nil || len(zones) == 0 {
-		return "", &Error{Status: http.StatusBadGateway, Message: "Cloudflare: zone " + c.zoneName + " not found"}
+	var z zoneObj
+	if id != "" {
+		env, err := c.do(ctx, http.MethodGet, "/zones/"+url.PathEscape(id), nil)
+		if err != nil {
+			return "", "", err
+		}
+		if err := json.Unmarshal(env.Result, &z); err != nil {
+			return "", "", &Error{Status: http.StatusBadGateway, Message: "Cloudflare: " + err.Error()}
+		}
+	} else {
+		env, err := c.do(ctx, http.MethodGet, "/zones?name="+url.QueryEscape(c.zoneName), nil)
+		if err != nil {
+			return "", "", err
+		}
+		var zones []zoneObj
+		if err := json.Unmarshal(env.Result, &zones); err != nil || len(zones) == 0 {
+			return "", "", &Error{Status: http.StatusBadGateway, Message: "Cloudflare: zone " + c.zoneName + " not found"}
+		}
+		z = zones[0]
 	}
 	c.mu.Lock()
-	c.zoneID = zones[0].ID
-	c.mu.Unlock()
-	return zones[0].ID, nil
+	defer c.mu.Unlock()
+	if c.zoneID == "" {
+		c.zoneID = z.ID
+	}
+	if c.account == "" {
+		c.account = z.Account.ID
+	}
+	return c.zoneID, c.account, nil
 }
 
 // cacheTTL bounds how stale List may be when fresh is false.
@@ -239,4 +283,64 @@ func (c *Client) Update(ctx context.Context, id string, in model.RecordInput) (*
 func (c *Client) Delete(ctx context.Context, id string) error {
 	_, err := c.one(ctx, http.MethodDelete, "/"+url.PathEscape(id), nil)
 	return err
+}
+
+// tunnelTTL bounds how stale the tunnel list may be. A failed lookup is
+// cached as long, so a token without the Tunnel permission costs one
+// request per period.
+const tunnelTTL = time.Minute
+
+type tunnelCache struct {
+	byID map[string]model.Tunnel
+	err  error
+	at   time.Time
+}
+
+// Tunnels returns the account's Cloudflare Tunnels by id, deleted ones
+// included. It needs the Account > Cloudflare Tunnel > Read permission.
+func (c *Client) Tunnels(ctx context.Context) (map[string]model.Tunnel, error) {
+	c.tunnelMu.Lock()
+	defer c.tunnelMu.Unlock()
+	if !c.tunnels.at.IsZero() && time.Since(c.tunnels.at) < tunnelTTL {
+		return c.tunnels.byID, c.tunnels.err
+	}
+	byID, err := c.listTunnels(ctx)
+	if ctx.Err() != nil {
+		return nil, err // a cancelled request says nothing about Cloudflare
+	}
+	c.tunnels = tunnelCache{byID: byID, err: err, at: time.Now()}
+	return byID, err
+}
+
+func (c *Client) listTunnels(ctx context.Context) (map[string]model.Tunnel, error) {
+	acc, err := c.AccountID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if acc == "" {
+		return nil, &Error{Status: http.StatusBadGateway, Message: "Cloudflare: account id unknown"}
+	}
+	out := map[string]model.Tunnel{}
+	for page := 1; ; page++ {
+		env, err := c.do(ctx, http.MethodGet, fmt.Sprintf("/accounts/%s/cfd_tunnel?page=%d&per_page=100", url.PathEscape(acc), page), nil)
+		if err != nil {
+			return nil, err
+		}
+		var ts []struct {
+			ID        string  `json:"id"`
+			Name      string  `json:"name"`
+			Status    string  `json:"status"`
+			DeletedAt *string `json:"deleted_at"`
+		}
+		if err := json.Unmarshal(env.Result, &ts); err != nil {
+			return nil, &Error{Status: http.StatusBadGateway, Message: "Cloudflare: " + err.Error()}
+		}
+		for _, t := range ts {
+			out[strings.ToLower(t.ID)] = model.Tunnel{ID: t.ID, Name: t.Name, Status: t.Status, Deleted: t.DeletedAt != nil && *t.DeletedAt != ""}
+		}
+		if env.ResultInfo == nil || page >= env.ResultInfo.TotalPages || len(ts) == 0 {
+			break
+		}
+	}
+	return out, nil
 }

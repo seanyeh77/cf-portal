@@ -47,6 +47,35 @@ func TestRecordsListing(t *testing.T) {
 	}
 }
 
+func TestRecordsTunnels(t *testing.T) {
+	e := newEnv(t)
+	e.login()
+	data := e.mustOK(e.do("GET", "/api/records", nil))
+	app, gone := findRec(t, data, "tun-app"), findRec(t, data, "tun-gone")
+	if tn := app["tunnel"].(map[string]any); tn["name"] != "home-lab" || tn["status"] != "healthy" || len(app["issues"].([]any)) != 1 {
+		t.Errorf("tun-app: %v %v", tn, app["issues"]) // only no_owner
+	}
+	if tn := gone["tunnel"].(map[string]any); tn["deleted"] != true || gone["level"] != "high" {
+		t.Errorf("tun-gone: %v %v", tn, gone["issues"])
+	}
+	if data["tunnel_error"] != "" || findRec(t, data, "docs")["tunnel"] != nil {
+		t.Error("tunnel fields on a plain record")
+	}
+
+	// Without the permission the names are unknown but nothing is flagged.
+	e2 := newEnv(t)
+	e2.mock.SetTunnelsForbidden(true)
+	e2.login()
+	data = e2.mustOK(e2.do("GET", "/api/records", nil))
+	gone = findRec(t, data, "tun-gone")
+	if tn := gone["tunnel"].(map[string]any); tn["deleted"] != false || tn["name"] != "" || gone["level"] == "high" {
+		t.Errorf("forbidden: %v %v", tn, gone["issues"])
+	}
+	if !strings.Contains(data["tunnel_error"].(string), "Cloudflare Tunnel › Read") {
+		t.Errorf("tunnel_error %v", data["tunnel_error"])
+	}
+}
+
 func TestCreateUpdateDelete(t *testing.T) {
 	e := newEnv(t)
 	e.login()

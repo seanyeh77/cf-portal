@@ -87,6 +87,32 @@ func TestCNAME(t *testing.T) {
 	}
 }
 
+func TestTunnelCNAME(t *testing.T) {
+	looked := false
+	s := newScanner(t, fakeResolver{}, func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("hi")) })
+	s.Resolver = lookupFunc(func(string) { looked = true })
+	ctx := context.Background()
+	target := "6ff42ae2-765d-4adf-8112-31c55c1551ef.cfargotunnel.com"
+	r := s.Scan(ctx, model.Record{RecordInput: model.RecordInput{Type: "CNAME", Name: "app.z", Content: target, Proxied: true}}, []int{1}, true)
+	if r.DNSStatus != "tunnel" || !r.Reachable || r.Detail != "經 Cloudflare：HTTP 200" {
+		t.Errorf("proxied: %+v", r)
+	}
+	r = s.Scan(ctx, model.Record{RecordInput: model.RecordInput{Type: "CNAME", Name: "app.z", Content: target}}, []int{1}, true)
+	if r.DNSStatus != "tunnel" || r.Reachable || r.Detail != "Tunnel 須啟用 Proxy 才能連線" {
+		t.Errorf("unproxied: %+v", r)
+	}
+	if looked {
+		t.Error("tunnel targets must not be resolved")
+	}
+}
+
+type lookupFunc func(string)
+
+func (f lookupFunc) LookupHost(_ context.Context, host string) ([]string, error) {
+	f(host)
+	return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
+}
+
 func TestProxied(t *testing.T) {
 	s := newScanner(t, fakeResolver{}, func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "down") {
@@ -144,7 +170,7 @@ func TestRunAndMaint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cf := cloudflare.New(srv.URL+"/client/v4", "tok", mockcf.Zone, "")
+	cf := cloudflare.New(srv.URL+"/client/v4", "tok", mockcf.Zone, "", "")
 	ctx := context.Background()
 	stud := m.Find("A", "student001")
 	st.PutMeta(ctx, stud.ID, model.Meta{NoScan: true})

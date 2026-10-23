@@ -2,15 +2,18 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"log"
 	"maps"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/seanyeh77/cf-portal/internal/analysis"
 	"github.com/seanyeh77/cf-portal/internal/assets"
+	"github.com/seanyeh77/cf-portal/internal/cloudflare"
 	"github.com/seanyeh77/cf-portal/internal/dnsrec"
 	"github.com/seanyeh77/cf-portal/internal/loop"
 	"github.com/seanyeh77/cf-portal/internal/model"
@@ -43,6 +46,9 @@ type recordOut struct {
 	Scan      *model.Scan      `json:"scan"`
 	Issues    []analysis.Issue `json:"issues"`
 	Muted     []analysis.Issue `json:"muted"`
+	// Tunnel is set on CNAMEs to a Cloudflare Tunnel; Name and Status are
+	// empty when the tunnel list is unavailable.
+	Tunnel *model.Tunnel `json:"tunnel,omitempty"`
 }
 
 // zoneState is everything known about the zone at one moment.
@@ -55,6 +61,9 @@ type zoneState struct {
 	Settings map[string]string
 	Listings map[string]model.Listing
 	Analysis *analysis.Result
+	Tunnels  map[string]model.Tunnel
+	// TunnelErr explains why Tunnels is nil although records use tunnels.
+	TunnelErr string
 }
 
 func analysisSettings(set map[string]string) analysis.Settings {
@@ -83,8 +92,14 @@ func (s *Server) loadZone(ctx context.Context, fresh bool) (*zoneState, error) {
 	for _, l := range ls {
 		z.Listings[l.RecordID] = l
 	}
+	if slices.ContainsFunc(recs, func(r model.Record) bool { return r.Type == "CNAME" && dnsrec.TunnelID(r.Content) != "" }) {
+		z.Tunnels, err = s.CF.Tunnels(ctx)
+		if err != nil {
+			z.TunnelErr = tunnelErrText(err)
+		}
+	}
 	z.Analysis = analysis.Analyze(analysis.Input{Zone: s.Cfg.CFZoneName, Records: recs, Meta: z.Meta, Scans: z.Scans, Mutes: z.Mutes,
-		Settings: analysisSettings(z.Settings), Now: s.Now(), Loc: s.Cfg.Timezone})
+		Tunnels: z.Tunnels, Settings: analysisSettings(z.Settings), Now: s.Now(), Loc: s.Cfg.Timezone})
 	return z, nil
 }
 
@@ -99,7 +114,26 @@ func (z *zoneState) out(r model.Record) recordOut {
 	if sc, ok := z.Scans[r.ID]; ok {
 		o.Scan = &sc
 	}
+	if r.Type == "CNAME" {
+		if id := dnsrec.TunnelID(r.Content); id != "" {
+			t, ok := z.Tunnels[id]
+			if !ok {
+				// Absent from a known list means deleted or another account's.
+				t = model.Tunnel{ID: id, Deleted: z.Tunnels != nil}
+			}
+			o.Tunnel = &t
+		}
+	}
 	return o
+}
+
+// tunnelErrText explains a failed tunnel lookup to the admin.
+func tunnelErrText(err error) string {
+	var ce *cloudflare.Error
+	if errors.As(err, &ce) && ce.Status == http.StatusForbidden {
+		return "API token 缺少 Account › Cloudflare Tunnel › Read 權限，無法顯示 tunnel 名稱與狀態。"
+	}
+	return "無法讀取 Cloudflare Tunnel：" + err.Error()
 }
 
 func (s *Server) apiRecords(w http.ResponseWriter, r *http.Request) error {
@@ -137,7 +171,7 @@ func (s *Server) apiRecords(w http.ResponseWriter, r *http.Request) error {
 		"zone": s.Cfg.CFZoneName, "today": s.today(), "synced_at": float64(z.SyncedAt.Unix()), "now": float64(s.Now().Unix()),
 		"records": out, "orphans": orphans, "summary": z.Analysis.Summary,
 		"kinds": analysis.Kinds, "groups": z.Analysis.Groups,
-		"scan": s.Scanner.Status(), "pending_requests": pending, "last_snapshot": lastSnap,
+		"scan": s.Scanner.Status(), "pending_requests": pending, "last_snapshot": lastSnap, "tunnel_error": z.TunnelErr,
 		"settings": map[string]string{"zombie_days": set["zombie_days"], "expiry_warn_days": set["expiry_warn_days"], "scan_ports": set["scan_ports"],
 			"name_rule_hint": set["name_rule_hint"], "name_rule": set["name_rule"], "requests_enabled": set["requests_enabled"]},
 	})

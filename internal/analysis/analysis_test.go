@@ -118,6 +118,72 @@ func TestDangling(t *testing.T) {
 	}
 }
 
+func TestTunnel(t *testing.T) {
+	const (
+		okID   = "6ff42ae2-765d-4adf-8112-31c55c1551ef"
+		downID = "1f2a3b4c-0000-4000-8000-00000000d0d0"
+		delID  = "9e8d7c6b-0000-4000-8000-0000000de1e7"
+		goneID = "00000000-dead-4bad-8bad-000000000000"
+	)
+	tun := func(id, name, uuid string, proxied bool) model.Record {
+		r := rec(id, "CNAME", name, uuid+".cfargotunnel.com")
+		r.Proxied = proxied
+		return r
+	}
+	fx := newFixture(tun("1", "a", okID, true), tun("2", "b", okID, true), tun("3", "c", okID, false),
+		tun("4", "d", downID, true), tun("5", "e", delID, true), tun("6", "f", goneID, true),
+		rec("7", "CNAME", "g", "a.example.org"))
+	for id := range fx.meta {
+		// Scans from before tunnels were recognized said nxdomain.
+		fx.scans[id] = model.Scan{LastTS: 1, Reachable: 1, DNSStatus: "nxdomain"}
+	}
+	ts := map[string]model.Tunnel{
+		okID:   {ID: okID, Name: "home-lab", Status: "healthy"},
+		downID: {ID: downID, Name: "old-lab", Status: "down"},
+		delID:  {ID: delID, Name: "retired", Status: "inactive", Deleted: true},
+	}
+	run := func(tunnels map[string]model.Tunnel) *Result {
+		return Analyze(Input{Zone: zone, Records: fx.recs, Meta: fx.meta, Scans: fx.scans, Mutes: fx.mutes, Tunnels: tunnels, Settings: fx.set, Now: now, Loc: taipei})
+	}
+	r := run(ts)
+	for _, id := range []string{"1", "2", "4", "5", "6"} {
+		if has(r, id, "dangling") || has(r, id, "shared_target") || has(r, id, "tunnel_unproxied") {
+			t.Errorf("%s: %v", id, kinds(r, id))
+		}
+	}
+	if len(kinds(r, "1")) != 0 {
+		t.Errorf("healthy proxied tunnel record must be clean: %v", kinds(r, "1"))
+	}
+	if !has(r, "3", "tunnel_unproxied") {
+		t.Errorf("3: %v", kinds(r, "3"))
+	}
+	if !has(r, "4", "tunnel_down") || issue(r, "4", "tunnel_down").Detail != "old-lab（1f2a3b4c）" {
+		t.Errorf("4: %v", r.Records["4"].Issues)
+	}
+	if !has(r, "5", "tunnel_missing") || !has(r, "6", "tunnel_missing") || issue(r, "6", "tunnel_missing").Detail != goneID {
+		t.Errorf("5, 6: %v %v", r.Records["5"].Issues, r.Records["6"].Issues)
+	}
+	// A CNAME to a tunnel record inherits its breakage.
+	if has(r, "7", "upstream_broken") {
+		t.Error("7 points at a working tunnel record")
+	}
+	fx.recs[0].Proxied = false
+	if r := run(ts); !has(r, "7", "upstream_broken") {
+		t.Errorf("7 must follow an unproxied tunnel record: %v", kinds(r, "7"))
+	}
+	fx.recs[0].Proxied = true
+	// Without the tunnel list only the record itself is judged.
+	r = run(nil)
+	for _, id := range []string{"4", "5", "6"} {
+		if len(kinds(r, id)) != 0 {
+			t.Errorf("unknown tunnels %s: %v", id, kinds(r, id))
+		}
+	}
+	if !has(r, "3", "tunnel_unproxied") {
+		t.Error("unproxied is known without the list")
+	}
+}
+
 func TestUnclaimed(t *testing.T) {
 	fx := newFixture(rec("1", "CNAME", "a", "me.github.io"), rec("2", "CNAME", "b", "you.github.io"))
 	fx.scans["1"] = model.Scan{LastTS: 1, DNSStatus: "unclaimed", DNSDetail: "GitHub Pages：查無對應站台"}

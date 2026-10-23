@@ -27,6 +27,22 @@ func TestNormalizeName(t *testing.T) {
 	}
 }
 
+func TestTunnelID(t *testing.T) {
+	cases := map[string]string{
+		"6FF42AE2-765D-4ADF-8112-31C55C1551EF.cfargotunnel.com.": "6ff42ae2-765d-4adf-8112-31c55c1551ef",
+		"6ff42ae2-765d-4adf-8112-31c55c1551ef.cfargotunnel.com":  "6ff42ae2-765d-4adf-8112-31c55c1551ef",
+		"cfargotunnel.com":   "",
+		"x.cfargotunnel.com": "",
+		"6ff42ae2-765d-4adf-8112-31c55c1551ef.cfargotunnel.com.evil.com": "",
+		"docs-site.pages.dev": "",
+	}
+	for in, want := range cases {
+		if got := TunnelID(in); got != want {
+			t.Errorf("TunnelID(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestValidate(t *testing.T) {
 	cases := []struct {
 		name string

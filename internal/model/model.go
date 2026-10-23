@@ -85,6 +85,15 @@ type Scan struct {
 	DNSDetail string   `json:"dns_detail"`
 }
 
+// Tunnel is a Cloudflare Tunnel of the zone's account.
+type Tunnel struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Status is Cloudflare's: healthy, degraded, down or inactive.
+	Status  string `json:"status"`
+	Deleted bool   `json:"deleted"`
+}
+
 // Listing is a record published on the service portal.
 type Listing struct {
 	RecordID    string  `json:"record_id"`

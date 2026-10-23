@@ -1,5 +1,5 @@
 import { dayDiff, fmtDateTimeShort, relTime } from '../../shared/format';
-import type { DNSRecord, Issue, Level, RecordsData } from '../types';
+import type { DNSRecord, Issue, Level, RecordsData, Tunnel } from '../types';
 
 const LEVEL_RANK: Record<string, number> = { high: 0, medium: 1, low: 2, info: 3 };
 export const LEVEL_NAME: Record<Level, string> = { high: '緊急', medium: '注意', low: '建議', info: '參考' };
@@ -48,9 +48,28 @@ function isLocalIP(s: string) {
   return /^127\./.test(s) || s === '0.0.0.0' || s === '::1' || s === '::';
 }
 
-/** Warning for proxying an internal address (A/AAAA only), or ''. */
+const TUNNEL_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.cfargotunnel\.com\.?$/i;
+
+/** Warning for a Proxy setting that cannot work, or ''. */
 export function proxyWarning(type: string, proxied: boolean, content: string) {
-  return proxied && (type === 'A' || type === 'AAAA') && isPrivateIP(content.trim()) ? '內網位址無法經 Cloudflare Proxy 連線，請取消勾選 Proxy。' : '';
+  const c = content.trim();
+  if (proxied && (type === 'A' || type === 'AAAA') && isPrivateIP(c)) return '內網位址無法經 Cloudflare Proxy 連線，請取消勾選 Proxy。';
+  if (!proxied && type === 'CNAME' && TUNNEL_RE.test(c)) return 'Cloudflare Tunnel 的位址只在 Cloudflare 內部有效，請勾選 Proxy。';
+  return '';
+}
+
+// ---- Cloudflare Tunnel ----
+
+const TUNNEL_STATUS: Record<string, string> = { healthy: '正常', degraded: '部分連線中斷', down: '離線', inactive: '未啟動' };
+
+/** How a tunnel target is shown: its name, or a short id when unknown. */
+export function tunnelName(t: Tunnel) {
+  return t.name || t.id.slice(0, 8);
+}
+
+/** The tunnel's state in words, or '' when unknown. */
+export function tunnelStatus(t: Tunnel) {
+  return t.deleted ? '已刪除或不屬於此帳號' : (TUNNEL_STATUS[t.status] ?? t.status);
 }
 
 export function isPublicIP(s: string) {
@@ -107,7 +126,7 @@ export const EMPTY_FILTERS: Filters = { q: '', type: '', group: '', health: '', 
 export function matches(r: DNSRecord, f: Filters) {
   if (f.q) {
     const q = f.q.toLowerCase();
-    const hay = [r.name, r.content, r.comment, r.meta.owner, r.meta.purpose, r.meta.notes, r.listing?.title ?? ''].join('\n').toLowerCase();
+    const hay = [r.name, r.content, r.comment, r.meta.owner, r.meta.purpose, r.meta.notes, r.listing?.title ?? '', r.tunnel?.name ?? ''].join('\n').toLowerCase();
     if (!hay.includes(q)) return false;
   }
   if (f.type && r.type !== f.type) return false;

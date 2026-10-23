@@ -78,7 +78,7 @@ func newEnv(t *testing.T, mut ...func(*config.Config)) *env {
 	}
 	t.Cleanup(func() { st.Close() })
 	st.Defaults = store.DefaultSettings(cfg.PortalTitle)
-	cf := cloudflare.New(cfg.CFAPIBase, cfg.CFAPIToken, cfg.CFZoneName, "")
+	cf := cloudflare.New(cfg.CFAPIBase, cfg.CFAPIToken, cfg.CFZoneName, "", "")
 	snaps := &snapshots.Store{Dir: filepath.Join(dir, "snapshots"), Loc: cfg.Timezone}
 	icons := assets.NewFetcher(filepath.Join(dir, "icons"), cfg.SimpleIconsBase, 5*time.Second, true)
 	hc := health.New(st, time.Minute, 5*time.Second, true)
