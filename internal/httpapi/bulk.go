@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/netip"
 	"slices"
@@ -11,70 +13,110 @@ import (
 	"github.com/seanyeh77/cf-portal/internal/dnsrec"
 	"github.com/seanyeh77/cf-portal/internal/loop"
 	"github.com/seanyeh77/cf-portal/internal/model"
+	"github.com/seanyeh77/cf-portal/internal/snapshots"
 	"github.com/seanyeh77/cf-portal/internal/store"
 )
 
-// Bulk operations take the selected record ids and report one result per
-// record. Each change is audited per record, like its single-record form,
-// so it shows in that record's history and can be undone on its own.
+// Bulk operations take the selected ids and report one result per item.
+// Each change is audited per record, like its single-record form, so it
+// shows in that record's history and can be undone on its own.
 
-func requireIDs(ids []string) error {
+type itemResult struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+}
+
+func requireIDs[T any](ids []T) error {
 	switch {
 	case len(ids) == 0:
-		return httpErr{http.StatusUnprocessableEntity, "未選擇任何 record"}
+		return httpErr{http.StatusUnprocessableEntity, "未選擇任何項目"}
 	case len(ids) > maxBatch:
 		return httpErr{http.StatusUnprocessableEntity, "一次最多處理 500 筆"}
 	}
 	return nil
 }
 
-func countOK(results []itemResult) int {
-	n := 0
-	for _, r := range results {
-		if r.OK {
-			n++
+// collect runs f for items 0..n-1, up to workers at a time. f names the
+// item on res; its error, if any, marks the item failed.
+func collect(n, workers int, f func(i int, res *itemResult) error) []itemResult {
+	out := make([]itemResult, n)
+	loop.ForEach(n, workers, func(i int) {
+		if err := f(i, &out[i]); err != nil {
+			out[i].Error = err.Error()
+		} else {
+			out[i].OK = true
 		}
-	}
-	return n
+	})
+	return out
 }
 
-// bulkEach runs f for every id with the current record, concurrently up to
-// cfWorkers, and collects the results.
-func (s *Server) bulkEach(r *http.Request, ids []string, f func(rec model.Record) error) ([]itemResult, error) {
-	recs, _, err := s.CF.List(r.Context(), true)
-	if err != nil {
-		return nil, err
-	}
-	byID := map[string]model.Record{}
+func recordsByID(recs []model.Record) map[string]model.Record {
+	m := make(map[string]model.Record, len(recs))
 	for _, rec := range recs {
-		byID[rec.ID] = rec
+		m[rec.ID] = rec
 	}
-	results := make([]itemResult, len(ids))
-	loop.ForEach(len(ids), cfWorkers, func(i int) {
+	return m
+}
+
+// bulkEach runs f for the record of every id, looked up in recs,
+// concurrently up to cfWorkers.
+func bulkEach(recs []model.Record, ids []string, f func(rec model.Record) error) []itemResult {
+	byID := recordsByID(recs)
+	return collect(len(ids), cfWorkers, func(i int, res *itemResult) error {
 		rec, ok := byID[ids[i]]
-		res := itemResult{ID: ids[i], Name: rec.Name}
-		switch {
-		case !ok:
-			res.Name, res.Error = ids[i], "record 已不存在"
-		default:
-			if err := f(rec); err != nil {
-				res.Error = err.Error()
-			} else {
-				res.OK = true
-			}
+		res.ID, res.Name = ids[i], ids[i]
+		if !ok {
+			return errors.New("record 已不存在")
 		}
-		results[i] = res
+		res.Name = rec.Name
+		return f(rec)
 	})
-	return results, nil
 }
 
 func writeBulk(w http.ResponseWriter, results []itemResult, extra map[string]any) {
-	ok := countOK(results)
+	ok := 0
+	for _, r := range results {
+		if r.OK {
+			ok++
+		}
+	}
 	out := map[string]any{"results": results, "ok": ok, "failed": len(results) - ok}
 	for k, v := range extra {
 		out[k] = v
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// safetySnapshot saves the zone before a bulk change and returns the
+// records it saved; without it the change is cancelled.
+func (s *Server) safetySnapshot(r *http.Request, reason string) (snapshots.Info, []model.Record, error) {
+	info, recs, err := s.Maint.Snapshot(r.Context(), "manual")
+	if err != nil {
+		return info, nil, httpErr{http.StatusBadGateway, "無法建立快照，已取消變更：" + err.Error()}
+	}
+	s.auditLog(r, "snapshot_create", info.Name, map[string]any{"reason": reason, "count": info.Count})
+	return info, recs, nil
+}
+
+func (s *Server) apiBulkDelete(w http.ResponseWriter, r *http.Request) error {
+	var b struct {
+		IDs []string `json:"ids"`
+	}
+	if err := decode(w, r, &b); err != nil {
+		return err
+	}
+	if err := requireIDs(b.IDs); err != nil {
+		return err
+	}
+	info, recs, err := s.safetySnapshot(r, "bulk_delete")
+	if err != nil {
+		return err
+	}
+	results := bulkEach(recs, b.IDs, func(rec model.Record) error { return s.deleteRecord(r, rec, "record_delete") })
+	writeBulk(w, results, map[string]any{"snapshot": info.Name})
+	return nil
 }
 
 // ---- DNS ----
@@ -96,6 +138,7 @@ type dnsChange struct {
 	Skipped string `json:"skipped,omitempty"`
 	Error   string `json:"error,omitempty"`
 	OK      bool   `json:"ok"`
+	rec     model.Record
 }
 
 // targetType is the record type for a new target: A or AAAA for an
@@ -113,22 +156,19 @@ func targetType(content string) string {
 // planDNS works out each record's new values. Conflicts are checked against
 // the zone with the earlier records of the plan already changed.
 func (s *Server) planDNS(recs []model.Record, ids []string, set dnsSet) []dnsChange {
-	byID := map[string]model.Record{}
-	for _, rec := range recs {
-		byID[rec.ID] = rec
-	}
+	byID := recordsByID(recs)
 	zone := slices.Clone(recs)
 	plan := make([]dnsChange, len(ids))
 	for i, id := range ids {
 		cur, ok := byID[id]
-		c := dnsChange{ID: id, Name: cur.Name, Before: cur.Input(), Changed: []string{}}
-		plan[i] = c
+		c := &plan[i]
+		*c = dnsChange{ID: id, Name: cur.Name, Before: cur.Input(), Changed: []string{}, rec: cur}
 		if !ok {
-			plan[i].Name, plan[i].Error = id, "record 已不存在"
+			c.Name, c.Error = id, "record 已不存在"
 			continue
 		}
 		if !dnsrec.Editable[cur.Type] {
-			plan[i].Skipped = cur.Type + " 請於 Cloudflare 編輯"
+			c.Skipped = cur.Type + " 請於 Cloudflare 編輯"
 			continue
 		}
 		in := cur.Input()
@@ -152,22 +192,22 @@ func (s *Server) planDNS(recs []model.Record, ids []string, set dnsSet) []dnsCha
 			in.TTL = *set.TTL
 		}
 		if err := dnsrec.Validate(&in, s.Cfg.CFZoneName); err != nil {
-			plan[i].Error = err.Error()
+			c.Error = err.Error()
 			continue
 		}
-		plan[i].Changed = model.ChangedFields(in, c.Before)
-		if len(plan[i].Changed) == 0 {
-			plan[i].Skipped = "無需變更"
+		c.Changed = model.ChangedFields(in, c.Before)
+		if len(c.Changed) == 0 {
+			c.Skipped = "無需變更"
 			if len(na) > 0 {
-				plan[i].Skipped = cur.Type + " 不適用" + strings.Join(na, "、")
+				c.Skipped = cur.Type + " 不適用" + strings.Join(na, "、")
 			}
 			continue
 		}
 		if err := dnsrec.Conflict(in, zone, id); err != nil {
-			plan[i].Error = err.Error()
+			c.Error = err.Error()
 			continue
 		}
-		plan[i].After = &in
+		c.After = &in
 		for j := range zone {
 			if zone[j].ID == id {
 				zone[j].RecordInput = in
@@ -192,31 +232,27 @@ func (s *Server) apiBulkDNS(w http.ResponseWriter, r *http.Request) error {
 	if b.Set.Content == nil && b.Set.Proxied == nil && b.Set.TTL == nil {
 		return httpErr{http.StatusUnprocessableEntity, "請勾選要修改的欄位"}
 	}
-	recs, _, err := s.CF.List(r.Context(), true)
+	if b.DryRun {
+		recs, _, err := s.CF.List(r.Context(), true)
+		if err != nil {
+			return err
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"results": s.planDNS(recs, b.IDs, b.Set)})
+		return nil
+	}
+	// Planned on the snapshot's records, so the plan matches what was saved.
+	info, recs, err := s.safetySnapshot(r, "bulk_dns")
 	if err != nil {
 		return err
 	}
 	plan := s.planDNS(recs, b.IDs, b.Set)
-	if b.DryRun {
-		writeJSON(w, http.StatusOK, map[string]any{"results": plan})
-		return nil
-	}
-	info, _, err := s.Maint.Snapshot(r.Context(), "manual")
-	if err != nil {
-		return httpErr{http.StatusBadGateway, "無法建立快照，已取消變更：" + err.Error()}
-	}
-	s.auditLog(r, "snapshot_create", info.Name, map[string]any{"reason": "bulk_dns", "count": info.Count})
-	byID := map[string]model.Record{}
-	for _, rec := range recs {
-		byID[rec.ID] = rec
-	}
 	loop.ForEach(len(plan), cfWorkers, func(i int) {
 		c := &plan[i]
 		if c.After == nil {
 			return
 		}
 		// No meta change: before and after are both empty.
-		if _, _, err := s.writeUpdate(r, byID[c.ID], *c.After, model.Meta{}, model.Meta{}, "record_update"); err != nil {
+		if _, _, err := s.writeUpdate(r, c.rec, *c.After, model.Meta{}, model.Meta{}, "record_update"); err != nil {
 			c.Error = err.Error()
 		} else {
 			c.OK = true
@@ -236,24 +272,37 @@ func (s *Server) apiBulkDNS(w http.ResponseWriter, r *http.Request) error {
 
 // ---- connection checks and issues ----
 
-func (s *Server) apiBulkScan(w http.ResponseWriter, r *http.Request) error {
+// idsBody decodes {"ids": [...]} and checks the count.
+func idsBody(w http.ResponseWriter, r *http.Request) ([]string, error) {
 	var b struct {
 		IDs []string `json:"ids"`
 	}
 	if err := decode(w, r, &b); err != nil {
-		return err
+		return nil, err
 	}
-	if err := requireIDs(b.IDs); err != nil {
-		return err
-	}
-	results, err := s.bulkEach(r, b.IDs, func(rec model.Record) error {
-		s.Scanner.ScanSoon(rec)
-		return nil
-	})
+	return b.IDs, requireIDs(b.IDs)
+}
+
+// cachedRecords lists the zone, reusing a recent list: for bulk actions
+// that do not write DNS.
+func (s *Server) cachedRecords(ctx context.Context) ([]model.Record, error) {
+	recs, _, err := s.CF.List(ctx, false)
+	return recs, err
+}
+
+func (s *Server) apiBulkScan(w http.ResponseWriter, r *http.Request) error {
+	ids, err := idsBody(w, r)
 	if err != nil {
 		return err
 	}
-	writeBulk(w, results, nil)
+	recs, err := s.cachedRecords(r.Context())
+	if err != nil {
+		return err
+	}
+	writeBulk(w, bulkEach(recs, ids, func(rec model.Record) error {
+		s.Scanner.ScanSoon(rec)
+		return nil
+	}), nil)
 	return nil
 }
 
@@ -297,7 +346,7 @@ func (s *Server) apiBulkMute(w http.ResponseWriter, r *http.Request) error {
 		}
 		return slices.ContainsFunc(list, func(i analysis.Issue) bool { return i.Kind == kind })
 	}
-	results, err := s.bulkEach(r, b.IDs, func(rec model.Record) error {
+	results := bulkEach(z.Records, b.IDs, func(rec model.Record) error {
 		changed := false
 		for _, set := range []struct {
 			kinds []string
@@ -329,9 +378,6 @@ func (s *Server) apiBulkMute(w http.ResponseWriter, r *http.Request) error {
 		}
 		return s.putMeta(r, rec, before, after, nil)
 	})
-	if err != nil {
-		return err
-	}
 	writeBulk(w, results, nil)
 	return nil
 }
@@ -354,8 +400,10 @@ func (s *Server) apiBulkListingCreate(w http.ResponseWriter, r *http.Request) er
 		return err
 	}
 	ids := make([]string, len(b.Items))
+	items := map[string]int{}
 	for i, it := range b.Items {
 		ids[i] = it.RecordID
+		items[it.RecordID] = i
 	}
 	if err := requireIDs(ids); err != nil {
 		return err
@@ -363,12 +411,12 @@ func (s *Server) apiBulkListingCreate(w http.ResponseWriter, r *http.Request) er
 	if b.Icon != "auto" && b.Icon != "none" {
 		b.Icon = "auto"
 	}
-	items := map[string]int{}
-	for i, id := range ids {
-		items[id] = i
-	}
 	ctx := r.Context()
-	results, err := s.bulkEach(r, ids, func(rec model.Record) error {
+	recs, err := s.cachedRecords(ctx)
+	if err != nil {
+		return err
+	}
+	writeBulk(w, bulkEach(recs, ids, func(rec model.Record) error {
 		it := b.Items[items[rec.ID]]
 		if prev, err := s.Store.Listing(ctx, rec.ID); err == nil && prev != nil {
 			return httpErr{http.StatusConflict, "已上架"}
@@ -377,11 +425,7 @@ func (s *Server) apiBulkListingCreate(w http.ResponseWriter, r *http.Request) er
 		}
 		_, err := s.saveListing(r, rec, nil, listingBody{Title: it.Title, URL: it.URL, Category: b.Category, Tags: b.Tags, Featured: b.Featured, Icon: b.Icon})
 		return err
-	})
-	if err != nil {
-		return err
-	}
-	writeBulk(w, results, nil)
+	}), nil)
 	return nil
 }
 
@@ -399,12 +443,16 @@ func (s *Server) apiBulkListingUpdate(w http.ResponseWriter, r *http.Request) er
 	if err := requireIDs(b.IDs); err != nil {
 		return err
 	}
-	add, remove := splitTagList(b.AddTags), splitTagList(b.RemoveTags)
+	add, remove := splitList(b.AddTags...), splitList(b.RemoveTags...)
 	if b.Category == nil && b.Featured == nil && len(add)+len(remove) == 0 {
 		return httpErr{http.StatusUnprocessableEntity, "請勾選要修改的欄位"}
 	}
 	ctx := r.Context()
-	results, err := s.bulkEach(r, b.IDs, func(rec model.Record) error {
+	recs, err := s.cachedRecords(ctx)
+	if err != nil {
+		return err
+	}
+	writeBulk(w, bulkEach(recs, b.IDs, func(rec model.Record) error {
 		prev, err := s.Store.Listing(ctx, rec.ID)
 		if err != nil {
 			return httpErr{http.StatusNotFound, "尚未上架"}
@@ -414,14 +462,8 @@ func (s *Server) apiBulkListingUpdate(w http.ResponseWriter, r *http.Request) er
 		if prev.URL != nil {
 			body.URL = *prev.URL
 		}
-		tags := splitTags(prev.Tags)
-		tags = slices.DeleteFunc(tags, func(t string) bool { return slices.Contains(remove, t) })
-		for _, t := range add {
-			if !slices.Contains(tags, t) {
-				tags = append(tags, t)
-			}
-		}
-		body.Tags = tags
+		tags := slices.DeleteFunc(splitList(prev.Tags), func(t string) bool { return slices.Contains(remove, t) })
+		body.Tags = append(tags, add...) // cleanListing drops duplicates
 		if b.Category != nil {
 			body.Category = *b.Category
 		}
@@ -430,55 +472,41 @@ func (s *Server) apiBulkListingUpdate(w http.ResponseWriter, r *http.Request) er
 		}
 		_, err = s.saveListing(r, rec, prev, body)
 		return err
-	})
-	if err != nil {
-		return err
-	}
-	writeBulk(w, results, nil)
+	}), nil)
 	return nil
 }
 
 func (s *Server) apiBulkListingDelete(w http.ResponseWriter, r *http.Request) error {
-	var b struct {
-		IDs []string `json:"ids"`
-	}
-	if err := decode(w, r, &b); err != nil {
-		return err
-	}
-	if err := requireIDs(b.IDs); err != nil {
+	ids, err := idsBody(w, r)
+	if err != nil {
 		return err
 	}
 	// A listing may outlive its record, so this does not need the zone.
-	results := make([]itemResult, len(b.IDs))
-	for i, id := range b.IDs {
-		res := itemResult{ID: id, Name: id}
-		if l, err := s.Store.Listing(r.Context(), id); err == nil {
+	writeBulk(w, collect(len(ids), 1, func(i int, res *itemResult) error {
+		res.ID, res.Name = ids[i], ids[i]
+		if l, err := s.Store.Listing(r.Context(), ids[i]); err == nil {
 			res.Name = l.Hostname
 		}
-		if err := s.removeListing(r, id); err != nil {
-			res.Error = err.Error()
-		} else {
-			res.OK = true
-		}
-		results[i] = res
-	}
-	writeBulk(w, results, nil)
+		return s.removeListing(r, ids[i])
+	}), nil)
 	return nil
 }
 
-func splitTagList(in []string) []string {
-	var out []string
-	for _, t := range in {
-		for _, p := range splitTags(t) {
-			if !slices.Contains(out, p) {
-				out = append(out, p)
-			}
-		}
-	}
-	return out
-}
-
 // ---- requests ----
+
+// eachRequest runs f, one at a time, for every request that still awaits
+// a decision.
+func (s *Server) eachRequest(r *http.Request, ids []int64, f func(q *model.Request) error) []itemResult {
+	return collect(len(ids), 1, func(i int, res *itemResult) error {
+		res.ID = strconv.FormatInt(ids[i], 10)
+		q, err := s.pendingRequest(r.Context(), ids[i])
+		if err != nil {
+			return err
+		}
+		res.Name = q.Name
+		return f(q)
+	})
+}
 
 func (s *Server) apiBulkApprove(w http.ResponseWriter, r *http.Request) error {
 	var b struct {
@@ -489,27 +517,40 @@ func (s *Server) apiBulkApprove(w http.ResponseWriter, r *http.Request) error {
 	if err := decode(w, r, &b); err != nil {
 		return err
 	}
-	if len(b.IDs) == 0 {
-		return httpErr{http.StatusUnprocessableEntity, "未選擇任何申請"}
+	if err := requireIDs(b.IDs); err != nil {
+		return err
 	}
-	// One at a time, so each approval sees the records the earlier ones created.
-	results := make([]itemResult, len(b.IDs))
-	for i, id := range b.IDs {
-		res := itemResult{ID: strconv.FormatInt(id, 10)}
-		q, err := s.pendingRequest(r.Context(), id)
-		if err == nil {
-			res.Name = q.Name
-			in := q.Input()
-			in.Proxied = b.Proxied && dnsrec.Proxiable[in.Type]
-			_, err = s.approveRequest(r, q, in, requestMeta(q), b.Note)
-		}
+	// The zone is listed once; each approval adds its record to this copy so
+	// later ones are checked against it.
+	ctx := r.Context()
+	zone, _, err := s.CF.List(ctx, true)
+	if err != nil {
+		return err
+	}
+	rule := s.settings(ctx)["name_rule"]
+	var created []model.Record
+	results := s.eachRequest(r, b.IDs, func(q *model.Request) error {
+		in := q.Input()
+		in.Proxied = b.Proxied && dnsrec.Proxiable[in.Type]
+		in, meta, err := s.prepareCreate(in, requestMeta(q))
 		if err != nil {
-			res.Error = err.Error()
-		} else {
-			res.OK = true
+			return err
 		}
-		results[i] = res
-	}
+		if msg := dnsrec.NameRuleError(in.Name, s.Cfg.CFZoneName, rule); msg != "" {
+			return invalidf("名稱格式不符：" + msg)
+		}
+		if err := dnsrec.Conflict(in, zone, ""); err != nil {
+			return err
+		}
+		rec, err := s.commitApproval(r, q, in, meta, b.Note)
+		if err != nil {
+			return err
+		}
+		zone = append(zone, *rec)
+		created = append(created, *rec)
+		return nil
+	})
+	s.Scanner.ScanSoon(created...)
 	writeBulk(w, results, nil)
 	return nil
 }
@@ -522,27 +563,12 @@ func (s *Server) apiBulkReject(w http.ResponseWriter, r *http.Request) error {
 	if err := decode(w, r, &b); err != nil {
 		return err
 	}
-	if len(b.IDs) == 0 {
-		return httpErr{http.StatusUnprocessableEntity, "未選擇任何申請"}
+	if err := requireIDs(b.IDs); err != nil {
+		return err
 	}
 	if strings.TrimSpace(b.Note) == "" {
 		return httpErr{http.StatusUnprocessableEntity, "請填寫駁回原因"}
 	}
-	results := make([]itemResult, len(b.IDs))
-	for i, id := range b.IDs {
-		res := itemResult{ID: strconv.FormatInt(id, 10)}
-		q, err := s.pendingRequest(r.Context(), id)
-		if err == nil {
-			res.Name = q.Name
-			err = s.rejectRequest(r, q, b.Note)
-		}
-		if err != nil {
-			res.Error = err.Error()
-		} else {
-			res.OK = true
-		}
-		results[i] = res
-	}
-	writeBulk(w, results, nil)
+	writeBulk(w, s.eachRequest(r, b.IDs, func(q *model.Request) error { return s.rejectRequest(r, q, b.Note) }), nil)
 	return nil
 }

@@ -208,7 +208,7 @@ func TestBatchAndBulk(t *testing.T) {
 	}
 	// bulk delete takes a snapshot first
 	out := e.mustOK(e.do("POST", "/api/records/bulk-delete", map[string]any{"ids": append(ids, "missing")}))
-	if out["deleted"].(float64) != 2 || out["failed"].(float64) != 1 || out["snapshot"] == "" {
+	if out["ok"].(float64) != 2 || out["failed"].(float64) != 1 || out["snapshot"] == "" {
 		t.Fatalf("bulk delete %v", out)
 	}
 	snap, err := e.srv.Snaps.Load(out["snapshot"].(string))

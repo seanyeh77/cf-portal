@@ -4,6 +4,7 @@ import { confirmDialog, Dialog, DialogActions, Tip, toast } from '../../shared/u
 import { refreshRecords } from '../lib/data';
 import { ExpiryButtons } from '../lib/expiry';
 import {
+  cnameTargetCounts,
   dnsRisks,
   fqdn,
   proxyWarning,
@@ -124,7 +125,7 @@ export function RecordEditor({ record, data, focus }: { record?: DNSRecord; data
         k === 'name' ? before.name !== form.name : k === 'content' ? normTarget(before.content) !== normTarget(form.content) : before[k] !== form[k],
       );
       if (changes.length > 0) {
-        const reasons = dnsRisks(record, form, data.records);
+        const reasons = dnsRisks(record, form, cnameTargetCounts(data.records));
         const risky = reasons.length > 0;
         const ok = await confirmDialog({
           title: risky ? '確認高風險 DNS 變更' : '確認 DNS 變更',

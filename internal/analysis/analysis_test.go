@@ -137,10 +137,13 @@ func TestTunnel(t *testing.T) {
 		// Scans from before tunnels were recognized said nxdomain.
 		fx.scans[id] = model.Scan{LastTS: 1, Reachable: 1, DNSStatus: "nxdomain"}
 	}
+	// By record id, as resolved by the caller; 6 is absent from the account.
+	home := model.Tunnel{ID: okID, Name: "home-lab", Status: "healthy"}
 	ts := map[string]model.Tunnel{
-		okID:   {ID: okID, Name: "home-lab", Status: "healthy"},
-		downID: {ID: downID, Name: "old-lab", Status: "down"},
-		delID:  {ID: delID, Name: "retired", Status: "inactive", Deleted: true},
+		"1": home, "2": home, "3": home,
+		"4": {ID: downID, Name: "old-lab", Status: "down"},
+		"5": {ID: delID, Name: "retired", Status: "inactive", Deleted: true},
+		"6": {ID: goneID, Deleted: true},
 	}
 	run := func(tunnels map[string]model.Tunnel) *Result {
 		return Analyze(Input{Zone: zone, Records: fx.recs, Meta: fx.meta, Scans: fx.scans, Mutes: fx.mutes, Tunnels: tunnels, Settings: fx.set, Now: now, Loc: taipei})

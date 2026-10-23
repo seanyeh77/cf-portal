@@ -2,15 +2,10 @@ import { useMemo, useRef, useState } from 'react';
 import { api, errMsg } from '../../shared/api';
 import { confirmDialog, Dialog, DialogActions, Tip, toast } from '../../shared/ui';
 import { act, refreshRecords } from '../lib/data';
-import { defaultListingTitle, distinctOf } from '../lib/records';
+import { defaultListingTitle, distinctOf, splitTags } from '../lib/records';
+import { TagButtons } from './BulkDialogs';
 import { closeModal } from '../lib/store';
 import type { DNSRecord, Listing, RecordsData } from '../types';
-
-const splitTags = (s: string) =>
-  s
-    .split(',')
-    .map((t) => t.trim())
-    .filter(Boolean);
 
 type IconMode = 'auto' | 'si' | 'upload' | 'none';
 
@@ -34,17 +29,11 @@ export function ListingDialog({ record, data }: { record: DNSRecord; data: Recor
   const fileRef = useRef<HTMLInputElement>(null);
 
   const categories = useMemo(() => distinctOf(data.records, (r) => r.listing?.category), [data.records]);
-  const usedTags = useMemo(() => {
-    const s = new Set<string>(splitTags(data.settings.preset_tags));
-    data.records.forEach((r) => r.listing?.tags.split(',').forEach((t) => t.trim() && s.add(t.trim())));
-    return Array.from(s);
-  }, [data.records, data.settings.preset_tags]);
+  const usedTags = useMemo(
+    () => splitTags([data.settings.preset_tags, ...data.records.map((r) => r.listing?.tags ?? '')].join(',')),
+    [data.records, data.settings.preset_tags],
+  );
   const tagList = splitTags(tags);
-
-  const addTag = (t: string) => {
-    if (tagList.includes(t)) return;
-    setTags([...tagList, t].join(', '));
-  };
 
   const iconValue = mode === 'si' ? `si:${slug.trim().toLowerCase()}` : mode;
 
@@ -167,15 +156,7 @@ export function ListingDialog({ record, data }: { record: DNSRecord; data: Recor
       <div className="field">
         <label htmlFor="ls-tags">標籤</label>
         <input id="ls-tags" className="input" value={tags} placeholder="逗號分隔，最多 6 個" onChange={(e) => setTags(e.target.value)} />
-        <div className="tag-adds small">
-          {usedTags
-            .filter((t) => !tagList.includes(t))
-            .map((t) => (
-              <button key={t} type="button" className="linkbtn" onClick={() => addTag(t)}>
-                + {t}
-              </button>
-            ))}
-        </div>
+        <TagButtons options={usedTags} value={tags} onChange={setTags} />
       </div>
       <div className="field">
         <span className="field-label">圖示</span>

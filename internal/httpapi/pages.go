@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -113,11 +114,15 @@ type publicService struct {
 	CreatedAt   float64  `json:"created_at"`
 }
 
-func splitTags(s string) []string {
+// splitList splits comma separated lists (half- or full-width commas, or
+// 、) into trimmed items, dropping blanks and duplicates.
+func splitList(lists ...string) []string {
 	out := []string{}
-	for _, t := range strings.Split(s, ",") {
-		if t = strings.TrimSpace(t); t != "" {
-			out = append(out, t)
+	for _, l := range lists {
+		for _, t := range strings.FieldsFunc(l, func(r rune) bool { return r == ',' || r == '，' || r == '、' }) {
+			if t = strings.TrimSpace(t); t != "" && !slices.Contains(out, t) {
+				out = append(out, t)
+			}
 		}
 	}
 	return out
@@ -138,7 +143,7 @@ func (s *Server) portalData(r *http.Request) (map[string]any, error) {
 	catCount := map[string]int{}
 	for _, l := range ls {
 		services = append(services, publicService{ID: l.RecordID, Title: l.Title, Description: l.Description, Category: l.Category,
-			URL: l.EffectiveURL(), Hostname: l.Hostname, Tags: splitTags(l.Tags), Icon: l.Icon, IconURL: iconURL(l),
+			URL: l.EffectiveURL(), Hostname: l.Hostname, Tags: splitList(l.Tags), Icon: l.Icon, IconURL: iconURL(l),
 			Featured: l.Featured, SortOrder: l.SortOrder, CreatedAt: l.CreatedAt})
 		c := l.Category
 		if c == "" {

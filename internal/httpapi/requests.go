@@ -254,8 +254,28 @@ func (s *Server) apiApprove(w http.ResponseWriter, r *http.Request) error {
 
 // approveRequest creates the request's record and marks it approved.
 func (s *Server) approveRequest(r *http.Request, q *model.Request, in model.RecordInput, meta model.Meta, note string) (*model.Record, error) {
+	in, meta, err := s.prepareCreate(in, meta)
+	if err == nil {
+		err = s.checkNameRule(r.Context(), in.Name)
+	}
+	if err == nil {
+		err = s.checkConflict(r.Context(), in, "")
+	}
+	if err != nil {
+		return nil, err
+	}
+	rec, err := s.commitApproval(r, q, in, meta, note)
+	if err == nil {
+		s.Scanner.ScanSoon(*rec)
+	}
+	return rec, err
+}
+
+// commitApproval creates the checked record of a request and marks the
+// request approved. The caller queues the connection check.
+func (s *Server) commitApproval(r *http.Request, q *model.Request, in model.RecordInput, meta model.Meta, note string) (*model.Record, error) {
 	note = trimLen(note, 500)
-	rec, _, err := s.createRecord(r, in, meta, true, "request_approve", map[string]any{"request_id": q.ID, "note": note})
+	rec, err := s.commitCreate(r, in, meta, "request_approve", map[string]any{"request_id": q.ID, "note": note})
 	if err != nil {
 		return nil, err
 	}

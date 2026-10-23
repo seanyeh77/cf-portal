@@ -372,3 +372,13 @@ export function TriCheck({ total, selected, label, onChange }: { total: number; 
     </label>
   );
 }
+
+/** A copy of s with keys added (on) or removed. */
+export function toggled<T>(s: Set<T>, keys: T | T[], on: boolean) {
+  const n = new Set(s);
+  for (const k of Array.isArray(keys) ? keys : [keys]) {
+    if (on) n.add(k);
+    else n.delete(k);
+  }
+  return n;
+}

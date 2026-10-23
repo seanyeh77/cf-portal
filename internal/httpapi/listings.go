@@ -52,18 +52,10 @@ func cleanListing(b listingBody) (listingBody, error) {
 			return b, invalidf("網址須以 http:// 或 https:// 開頭")
 		}
 	}
-	var tags []string
-	seen := map[string]bool{}
-	for _, t := range b.Tags {
-		for _, p := range splitTags(t) {
-			if seen[p] {
-				continue
-			}
-			if len([]rune(p)) > 20 {
-				return b, invalidf("每個標籤最多 20 字")
-			}
-			seen[p] = true
-			tags = append(tags, p)
+	tags := splitList(b.Tags...)
+	for _, t := range tags {
+		if len([]rune(t)) > 20 {
+			return b, invalidf("每個標籤最多 20 字")
 		}
 	}
 	if len(tags) > 6 {

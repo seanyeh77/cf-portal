@@ -307,7 +307,7 @@ func (s *Scanner) Scan(ctx context.Context, r model.Record, ports []int, dnsOK b
 	switch r.Type {
 	case "CNAME":
 		target := dnsrec.NormalizeTarget(r.Content)
-		if dnsrec.TunnelID(target) != "" {
+		if dnsrec.Tunnel(r) != "" {
 			// Resolvable only inside Cloudflare; only the proxied name can be probed.
 			res.DNSStatus = "tunnel"
 			res.DNSDetail = "Cloudflare Tunnel"

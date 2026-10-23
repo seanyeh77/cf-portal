@@ -60,6 +60,15 @@ func TunnelID(target string) string {
 	return ""
 }
 
+// Tunnel returns the tunnel id a record routes to, or "" when it is not a
+// CNAME to a Cloudflare Tunnel.
+func Tunnel(r model.Record) string {
+	if r.Type != "CNAME" {
+		return ""
+	}
+	return TunnelID(r.Content)
+}
+
 // Relative returns the part of name in front of the zone ("" for the apex).
 func Relative(name, zone string) string {
 	name = strings.TrimSuffix(strings.ToLower(name), ".")

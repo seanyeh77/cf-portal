@@ -6,7 +6,6 @@ import (
 	"log"
 	"maps"
 	"net/http"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -15,7 +14,6 @@ import (
 	"github.com/seanyeh77/cf-portal/internal/assets"
 	"github.com/seanyeh77/cf-portal/internal/cloudflare"
 	"github.com/seanyeh77/cf-portal/internal/dnsrec"
-	"github.com/seanyeh77/cf-portal/internal/loop"
 	"github.com/seanyeh77/cf-portal/internal/model"
 	"github.com/seanyeh77/cf-portal/internal/store"
 )
@@ -61,8 +59,9 @@ type zoneState struct {
 	Settings map[string]string
 	Listings map[string]model.Listing
 	Analysis *analysis.Result
-	Tunnels  map[string]model.Tunnel
-	// TunnelErr explains why Tunnels is nil although records use tunnels.
+	// Tunnels holds, by record id, the tunnel each tunnel record routes to.
+	Tunnels map[string]model.Tunnel
+	// TunnelErr explains why tunnel names and states are unknown.
 	TunnelErr string
 }
 
@@ -92,12 +91,7 @@ func (s *Server) loadZone(ctx context.Context, fresh bool) (*zoneState, error) {
 	for _, l := range ls {
 		z.Listings[l.RecordID] = l
 	}
-	if slices.ContainsFunc(recs, func(r model.Record) bool { return r.Type == "CNAME" && dnsrec.TunnelID(r.Content) != "" }) {
-		z.Tunnels, err = s.CF.Tunnels(ctx)
-		if err != nil {
-			z.TunnelErr = tunnelErrText(err)
-		}
-	}
+	z.Tunnels, z.TunnelErr = s.recordTunnels(ctx, recs)
 	z.Analysis = analysis.Analyze(analysis.Input{Zone: s.Cfg.CFZoneName, Records: recs, Meta: z.Meta, Scans: z.Scans, Mutes: z.Mutes,
 		Tunnels: z.Tunnels, Settings: analysisSettings(z.Settings), Now: s.Now(), Loc: s.Cfg.Timezone})
 	return z, nil
@@ -114,17 +108,38 @@ func (z *zoneState) out(r model.Record) recordOut {
 	if sc, ok := z.Scans[r.ID]; ok {
 		o.Scan = &sc
 	}
-	if r.Type == "CNAME" {
-		if id := dnsrec.TunnelID(r.Content); id != "" {
-			t, ok := z.Tunnels[id]
-			if !ok {
-				// Absent from a known list means deleted or another account's.
-				t = model.Tunnel{ID: id, Deleted: z.Tunnels != nil}
-			}
-			o.Tunnel = &t
-		}
+	if t, ok := z.Tunnels[r.ID]; ok {
+		o.Tunnel = &t
 	}
 	return o
+}
+
+// recordTunnels resolves the tunnel of every tunnel record, by record id.
+// The account's tunnels are listed only when some record uses one; if they
+// cannot be listed, names and states stay empty and the reason is returned.
+func (s *Server) recordTunnels(ctx context.Context, recs []model.Record) (map[string]model.Tunnel, string) {
+	out := map[string]model.Tunnel{}
+	for _, r := range recs {
+		if id := dnsrec.Tunnel(r); id != "" {
+			out[r.ID] = model.Tunnel{ID: id}
+		}
+	}
+	if len(out) == 0 {
+		return out, ""
+	}
+	account, err := s.CF.Tunnels(ctx)
+	if err != nil {
+		return out, tunnelErrText(err)
+	}
+	for rid, t := range out {
+		if known, ok := account[t.ID]; ok {
+			out[rid] = known
+		} else {
+			// Absent from the list means deleted or another account's.
+			out[rid] = model.Tunnel{ID: t.ID, Deleted: true}
+		}
+	}
+	return out, ""
 }
 
 // tunnelErrText explains a failed tunnel lookup to the admin.
@@ -615,54 +630,6 @@ func (s *Server) apiBulkMeta(w http.ResponseWriter, r *http.Request) error {
 		changed++
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"updated": changed})
-	return nil
-}
-
-type itemResult struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	OK    bool   `json:"ok"`
-	Error string `json:"error,omitempty"`
-}
-
-func (s *Server) apiBulkDelete(w http.ResponseWriter, r *http.Request) error {
-	var b struct {
-		IDs []string `json:"ids"`
-	}
-	if err := decode(w, r, &b); err != nil {
-		return err
-	}
-	if len(b.IDs) == 0 {
-		return httpErr{http.StatusUnprocessableEntity, "未選擇任何 record"}
-	}
-	info, recs, err := s.Maint.Snapshot(r.Context(), "manual")
-	if err != nil {
-		return httpErr{http.StatusBadGateway, "無法建立快照，已取消刪除：" + err.Error()}
-	}
-	s.auditLog(r, "snapshot_create", info.Name, map[string]any{"reason": "bulk_delete", "count": info.Count})
-	byID := map[string]model.Record{}
-	for _, rec := range recs {
-		byID[rec.ID] = rec
-	}
-	results := make([]itemResult, len(b.IDs))
-	loop.ForEach(len(b.IDs), cfWorkers, func(i int) {
-		id := b.IDs[i]
-		rec, ok := byID[id]
-		if !ok {
-			results[i] = itemResult{ID: id, Name: id, Error: "record 已不存在"}
-		} else if err := s.deleteRecord(r, rec, "record_delete"); err != nil {
-			results[i] = itemResult{ID: id, Name: rec.Name, Error: err.Error()}
-		} else {
-			results[i] = itemResult{ID: id, Name: rec.Name, OK: true}
-		}
-	})
-	okN := 0
-	for _, res := range results {
-		if res.OK {
-			okN++
-		}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"results": results, "deleted": okN, "failed": len(b.IDs) - okN, "snapshot": info.Name})
 	return nil
 }
 

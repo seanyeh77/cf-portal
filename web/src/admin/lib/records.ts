@@ -258,18 +258,41 @@ export function dependents(records: DNSRecord[], name: string) {
   return records.filter((r) => r.type === 'CNAME' && normTarget(r.content) === n);
 }
 
+/** How many CNAMEs point at each name, for dnsRisks. */
+export function cnameTargetCounts(records: DNSRecord[]) {
+  const m = new Map<string, number>();
+  for (const r of records) if (r.type === 'CNAME') m.set(normTarget(r.content), (m.get(normTarget(r.content)) ?? 0) + 1);
+  return m;
+}
+
 /** Why changing record to after deserves a closer look; empty when it is routine. */
-export function dnsRisks(record: DNSRecord, after: { type: string; name: string; content: string; proxied: boolean }, records: DNSRecord[]) {
+export function dnsRisks(record: DNSRecord, after: { type: string; name: string; content: string; proxied: boolean }, cnameCounts: Map<string, number>) {
   const reasons: string[] = [];
   const nameChanged = normTarget(record.name) !== normTarget(after.name);
   const contentChanged = normTarget(record.content) !== normTarget(after.content);
   if (record.proxied && !after.proxied && ['A', 'AAAA'].includes(after.type) && isPublicIP(after.content)) reasons.push('停用 Proxy 後，來源主機的 IP 會公開。');
   if (record.type !== after.type || nameChanged) reasons.push('變更類型或名稱等同刪除舊 record 再新增，舊名稱將立即失效。');
-  const deps = dependents(records, record.name).filter((d) => d.id !== record.id);
-  if (deps.length && (nameChanged || contentChanged)) reasons.push(`另有 ${deps.length} 筆 CNAME 指向此 record，會一併受影響。`);
+  const deps = cnameCounts.get(normTarget(record.name)) ?? 0;
+  if (deps && (nameChanged || contentChanged)) reasons.push(`另有 ${deps} 筆 CNAME 指向此 record，會一併受影響。`);
   if (record.listing) reasons.push('此 record 已上架到服務入口。');
   return reasons;
 }
+
+/** The records with the given ids, in that order, skipping unknown ids. */
+export function pickRecords(data: RecordsData, ids: string[]) {
+  const byID = new Map(data.records.map((r) => [r.id, r]));
+  return ids.map((id) => byID.get(id)).filter((r): r is DNSRecord => !!r);
+}
+
+/** Splits a tag list on half- or full-width commas and 、, like the server. */
+export const splitTags = (s: string) => [
+  ...new Set(
+    s
+      .split(/[,，、]/)
+      .map((t) => t.trim())
+      .filter(Boolean),
+  ),
+];
 
 /** The title a new portal listing starts with: a short purpose, else the subdomain. */
 export function defaultListingTitle(r: DNSRecord, zone: string) {

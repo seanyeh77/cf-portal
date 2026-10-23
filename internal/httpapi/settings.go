@@ -39,17 +39,6 @@ func cycleDates(v string) ([]string, error) {
 	return out, nil
 }
 
-// splitList splits a comma separated list, dropping blanks and duplicates.
-func splitList(v string) []string {
-	var out []string
-	for _, p := range strings.FieldsFunc(v, func(r rune) bool { return r == ',' || r == '，' || r == '、' }) {
-		if p = strings.TrimSpace(p); p != "" && !slices.Contains(out, p) {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
 func (s *Server) settingsOut(set map[string]string) map[string]any {
 	out := map[string]any{}
 	for k, v := range set {

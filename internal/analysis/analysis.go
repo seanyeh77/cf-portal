@@ -95,8 +95,9 @@ type Input struct {
 	Meta    map[string]model.Meta
 	Scans   map[string]model.Scan
 	Mutes   map[string]map[string]bool
-	// Tunnels are the account's tunnels by lower-case id; nil when unknown
-	// (the token lacks the permission), which skips the tunnel state rules.
+	// Tunnels holds, by record id, the tunnel each tunnel record routes to.
+	// A record without an entry, or one with no status, is judged only on
+	// what the record itself shows.
 	Tunnels  map[string]model.Tunnel
 	Settings Settings
 	Now      time.Time
@@ -169,11 +170,11 @@ func hasPort(ports string, want ...string) bool {
 }
 
 // tunnelLabel names a tunnel for issue details.
-func tunnelLabel(t model.Tunnel, id string) string {
-	if t.Name != "" {
-		return t.Name + "（" + id[:8] + "）"
+func tunnelLabel(t model.Tunnel) string {
+	if t.Name != "" && len(t.ID) >= 8 {
+		return t.Name + "（" + t.ID[:8] + "）"
 	}
-	return id
+	return t.ID
 }
 
 // AddDays adds n days to a YYYY-MM-DD date.
@@ -229,21 +230,16 @@ func Analyze(in Input) *Result {
 		if isAddr && dnsrec.IsLocalAddr(addr) {
 			add(r.ID, "loopback", addr.String())
 		}
-		tunnel := ""
-		if r.Type == "CNAME" {
-			tunnel = dnsrec.TunnelID(target)
-		}
+		tunnel := dnsrec.Tunnel(r)
 		if tunnel != "" {
 			if !r.Proxied {
 				add(r.ID, "tunnel_unproxied", "")
 			}
-			if in.Tunnels != nil {
-				switch t, ok := in.Tunnels[tunnel]; {
-				case !ok || t.Deleted:
-					add(r.ID, "tunnel_missing", tunnelLabel(t, tunnel))
-				case t.Status == "down" || t.Status == "inactive":
-					add(r.ID, "tunnel_down", tunnelLabel(t, tunnel))
-				}
+			switch t := in.Tunnels[r.ID]; {
+			case t.Deleted:
+				add(r.ID, "tunnel_missing", tunnelLabel(t))
+			case t.Status == "down" || t.Status == "inactive":
+				add(r.ID, "tunnel_down", tunnelLabel(t))
 			}
 		}
 		// Tunnel targets never resolve publicly, so DNS results say nothing.

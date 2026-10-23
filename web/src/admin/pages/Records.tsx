@@ -3,7 +3,7 @@ import { api, errMsg } from '../../shared/api';
 import { relTime } from '../../shared/format';
 import { expiryPresets, type ExpiryCycle } from '../lib/expiry';
 import { bulkExport, bulkScan, bulkUnlist } from '../dialogs/BulkDialogs';
-import { MenuButton, Tip, toast, TriCheck, type MenuItem } from '../../shared/ui';
+import { MenuButton, Tip, toast, toggled, TriCheck, type MenuItem } from '../../shared/ui';
 import { act, refreshRecords, useRecords } from '../lib/data';
 import {
   describeFilters,
@@ -171,11 +171,7 @@ function SelectAll({ rows, selection, label }: { rows: DNSRecord[]; selection: S
       selected={rows.filter((r) => selection.has(r.id)).length}
       label={label}
       onChange={(all) =>
-        selectionStore.set((prev) => {
-          const next = new Set(prev);
-          rows.forEach((r) => (all ? next.add(r.id) : next.delete(r.id)));
-          return next;
-        })
+        selectionStore.set((prev) => toggled(prev, rows.map((r) => r.id), all))
       }
     />
   );
@@ -225,12 +221,7 @@ const Row = memo(function Row({
             type="checkbox"
             checked={selected}
             onChange={(e) =>
-              selectionStore.set((prev) => {
-                const n = new Set(prev);
-                if (e.target.checked) n.add(r.id);
-                else n.delete(r.id);
-                return n;
-              })
+              selectionStore.set((prev) => toggled(prev, r.id, e.target.checked))
             }
           />
         </label>

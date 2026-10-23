@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, errMsg } from '../../shared/api';
+import { api } from '../../shared/api';
 import { Dialog, DialogActions, Tip, toast } from '../../shared/ui';
-import { act, refreshRecords, useRecords } from '../lib/data';
+import { act, useRecords } from '../lib/data';
+import { FailedList, useBulk } from '../lib/bulk';
 import { ExpiryButtons } from '../lib/expiry';
-import { ownersOf, sub } from '../lib/records';
+import { ownersOf, pickRecords, sub } from '../lib/records';
 import { closeModal, drawerStore, modalStore, selectionStore, useStore } from '../lib/store';
 import type { DNSRecord, RecordsData } from '../types';
 import { BatchDialog } from './BatchDialog';
@@ -198,26 +199,14 @@ function BulkMetaDialog({ ids, focusOwner, data }: { ids: string[]; focusOwner?:
 }
 
 function BulkDeleteDialog({ ids, data }: { ids: string[]; data: RecordsData }) {
-  const byID = new Map(data.records.map((r) => [r.id, r]));
-  const recs = ids.map((id) => byID.get(id)).filter((r): r is DNSRecord => !!r);
+  const recs = pickRecords(data, ids);
   const [sure, setSure] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const del = async () => {
-    setBusy(true);
-    try {
-      const res = await api<{ deleted: number; failed: number; results: { ok: boolean; name: string; error?: string }[] }>('POST', '/api/records/bulk-delete', { ids });
-      const firstErr = res.results.find((x) => !x.ok);
-      if (res.failed > 0) toast(`已刪除 ${res.deleted} 筆，${res.failed} 筆失敗：${firstErr?.name}：${firstErr?.error}`, { error: true });
-      else toast(`已刪除 ${res.deleted} 筆`);
-      selectionStore.set(new Set());
-      closeModal();
-      refreshRecords();
-    } catch (e) {
-      toast(errMsg(e), { error: true });
-    } finally {
-      setBusy(false);
-    }
-  };
+  // Deleting is the one bulk action that clears the selection.
+  const { busy, failed, run } = useBulk(() => {
+    selectionStore.set(new Set());
+    closeModal();
+  });
+  const del = () => run('/api/records/bulk-delete', { ids }, (n) => `已刪除 ${n} 筆`);
   return (
     <Dialog
       title={`刪除 ${recs.length} 筆 Record`}
@@ -226,6 +215,7 @@ function BulkDeleteDialog({ ids, data }: { ids: string[]; data: RecordsData }) {
       testId="bulk-delete"
       footer={<DialogActions onCancel={closeModal} confirm="刪除" danger disabled={!sure || busy} onConfirm={del} cancelFirst />}
     >
+      <FailedList items={failed} />
       <ul className="bulk-list mono small">
         {recs.map((r) => (
           <li key={r.id}>

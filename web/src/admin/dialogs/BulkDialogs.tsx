@@ -1,18 +1,24 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { api, errMsg } from '../../shared/api';
-import { confirmDialog, Dialog, DialogActions, Tip, toast } from '../../shared/ui';
-import { FailedList, runBulk, type BulkItem } from '../lib/bulk';
-import { refreshRecords } from '../lib/data';
-import { defaultListingTitle, distinctOf, DNS_FIELD_LABEL, dnsRisks, fieldValue, proxyWarning, sub, TTL_OPTIONS } from '../lib/records';
+import { confirmDialog, Dialog, DialogActions, Tip, toast, toggled } from '../../shared/ui';
+import { FailedList, runBulk, useBulk } from '../lib/bulk';
+import {
+  cnameTargetCounts,
+  defaultListingTitle,
+  distinctOf,
+  DNS_FIELD_LABEL,
+  dnsRisks,
+  fieldValue,
+  pickRecords,
+  proxyWarning,
+  splitTags,
+  sub,
+  TTL_OPTIONS,
+} from '../lib/records';
 import { closeModal } from '../lib/store';
-import type { DNSRecord, RecordInput, RecordsData } from '../types';
+import type { RecordInput, RecordsData } from '../types';
 
 // Bulk dialogs keep the selection, so the next action can follow.
-
-const pick = (data: RecordsData, ids: string[]) => {
-  const byID = new Map(data.records.map((r) => [r.id, r]));
-  return ids.map((id) => byID.get(id)).filter((r): r is DNSRecord => !!r);
-};
 
 /** A labelled input that applies only when its checkbox is ticked. */
 function OptRow({ on, setOn, label, tip, children }: { on: boolean; setOn: (v: boolean) => void; label: string; tip?: string; children: ReactNode }) {
@@ -28,22 +34,16 @@ function OptRow({ on, setOn, label, tip, children }: { on: boolean; setOn: (v: b
   );
 }
 
-const splitTags = (s: string) =>
-  s
-    .split(/[,，、]/)
-    .map((t) => t.trim())
-    .filter(Boolean);
-
-/** Buttons that add a preset tag to a comma separated tag field. */
-function TagPresets({ data, value, onChange, disabled }: { data: RecordsData; value: string; onChange: (v: string) => void; disabled?: boolean }) {
+/** Buttons that append one of options, marked with sign, to a comma separated tag field. */
+export function TagButtons({ options, value, onChange, sign = '+' }: { options: string[]; value: string; onChange: (v: string) => void; sign?: string }) {
   const cur = splitTags(value);
   return (
-    <div className="row-gap tag-presets">
-      {splitTags(data.settings.preset_tags)
+    <div className="tag-adds small">
+      {options
         .filter((t) => !cur.includes(t))
         .map((t) => (
-          <button key={t} type="button" className="btn small" disabled={disabled} onClick={() => onChange([...cur, t].join(', '))}>
-            + {t}
+          <button key={t} type="button" className="linkbtn" onClick={() => onChange([...cur, t].join(', '))}>
+            {sign} {t}
           </button>
         ))}
     </div>
@@ -55,53 +55,39 @@ function TagPresets({ data, value, onChange, disabled }: { data: RecordsData; va
 type DnsChange = { id: string; name: string; before: RecordInput; after?: RecordInput; changed: string[]; skipped?: string; error?: string; ok: boolean };
 
 export function BulkDnsDialog({ ids, data }: { ids: string[]; data: RecordsData }) {
-  const recs = pick(data, ids);
+  const recs = pickRecords(data, ids);
   const [on, setOn] = useState({ content: false, proxied: false, ttl: false });
   const [content, setContent] = useState('');
   const [proxied, setProxied] = useState('on');
   const [ttl, setTtl] = useState(1);
   const [plan, setPlan] = useState<DnsChange[] | null>(null);
-  const [failed, setFailed] = useState<BulkItem[]>([]);
-  const [busy, setBusy] = useState(false);
+  const [planning, setPlanning] = useState(false);
   const [error, setError] = useState('');
+  const bulk = useBulk(closeModal);
+  const cnameCounts = useMemo(() => cnameTargetCounts(data.records), [data.records]);
 
   const set: Record<string, unknown> = {};
   if (on.content) set.content = content.trim();
   if (on.proxied) set.proxied = proxied === 'on';
   if (on.ttl) set.ttl = ttl;
-  const newType = /^[\d.]+$/.test(content.trim()) ? 'A' : content.includes(':') ? 'AAAA' : 'CNAME';
-  const warn = on.content && content.trim() ? proxyWarning(newType, on.proxied ? proxied === 'on' : true, content) : '';
 
   const preview = async () => {
     setError('');
     if (!Object.keys(set).length) return setError('請勾選要修改的欄位');
     if (on.content && !content.trim()) return setError('請填寫新的指向目標');
-    setBusy(true);
+    setPlanning(true);
     try {
       setPlan((await api<{ results: DnsChange[] }>('POST', '/api/records/bulk-dns', { ids, set, dry_run: true })).results);
     } catch (e) {
       setError(errMsg(e));
     } finally {
-      setBusy(false);
+      setPlanning(false);
     }
   };
 
   const changes = plan?.filter((c) => c.after) ?? [];
-  const apply = async () => {
-    setBusy(true);
-    try {
-      const res = await api<{ results: DnsChange[]; ok: number; failed: number }>('POST', '/api/records/bulk-dns', { ids, set });
-      const bad = res.results.filter((c) => c.error).map((c) => ({ id: c.id, name: c.name, ok: false, error: c.error }));
-      toast(`已修改 ${res.ok} 筆，連線檢查中` + (bad.length ? `，${bad.length} 筆失敗` : ''), bad.length ? { error: true } : undefined);
-      await refreshRecords();
-      if (bad.length) setFailed(bad);
-      else closeModal();
-    } catch (e) {
-      setError(errMsg(e));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const apply = () => bulk.run('/api/records/bulk-dns', { ids, set }, (n) => `已修改 ${n} 筆，連線檢查中`);
+  const failed = bulk.failed;
 
   if (plan) {
     const byID = new Map(recs.map((r) => [r.id, r]));
@@ -117,7 +103,7 @@ export function BulkDnsDialog({ ids, data }: { ids: string[]; data: RecordsData 
             error={error}
             onCancel={closeModal}
             confirm={failed.length ? '關閉' : `套用 ${changes.length} 筆`}
-            disabled={busy || (!failed.length && !changes.length)}
+            disabled={bulk.busy || (!failed.length && !changes.length)}
             onConfirm={failed.length ? closeModal : apply}
             extra={
               !failed.length && (
@@ -141,7 +127,8 @@ export function BulkDnsDialog({ ids, data }: { ids: string[]; data: RecordsData 
             <tbody>
               {changes.map((c) => {
                 const rec = byID.get(c.id);
-                const risks = rec && c.after ? dnsRisks(rec, c.after, data.records) : [];
+                const risks = rec && c.after ? dnsRisks(rec, c.after, cnameCounts) : [];
+                const warn = c.after ? proxyWarning(c.after.type, c.after.proxied, c.after.content) : '';
                 return (
                   <tr key={c.id} data-testid={'plan-' + sub(c.name, data.zone)}>
                     <td className="mono">{sub(c.name, data.zone)}</td>
@@ -152,6 +139,7 @@ export function BulkDnsDialog({ ids, data }: { ids: string[]; data: RecordsData 
                           <strong className={risks.length ? 'lv-high' : undefined}>{fieldValue(f, c.after![f as keyof RecordInput])}</strong>
                         </div>
                       ))}
+                      {warn && <div className="small lv-medium">注意：{warn}</div>}
                       {risks.map((r) => (
                         <div key={r} className="small lv-medium">
                           注意：{r}
@@ -187,10 +175,9 @@ export function BulkDnsDialog({ ids, data }: { ids: string[]; data: RecordsData 
       onClose={closeModal}
       width={600}
       testId="bulk-dns"
-      footer={<DialogActions error={error} onCancel={closeModal} confirm="預覽變更" disabled={busy} onConfirm={preview} />}
+      footer={<DialogActions error={error} onCancel={closeModal} confirm="預覽變更" disabled={planning} onConfirm={preview} />}
     >
       <p className="small muted">僅修改勾選的欄位。</p>
-      {warn && <div className="warnbox">{warn}</div>}
       <OptRow
         on={on.content}
         setOn={(v) => setOn((p) => ({ ...p, content: v }))}
@@ -228,25 +215,20 @@ export function BulkDnsDialog({ ids, data }: { ids: string[]; data: RecordsData 
 // ---- portal listings ----
 
 export function BulkListCreateDialog({ ids, data }: { ids: string[]; data: RecordsData }) {
-  const all = pick(data, ids);
+  const all = pickRecords(data, ids);
   const recs = all.filter((r) => !r.listing);
   const [rows, setRows] = useState(() => recs.map((r) => ({ id: r.id, title: defaultListingTitle(r, data.zone), url: '' })));
   const [category, setCategory] = useState('');
   const [tags, setTags] = useState('');
   const [featured, setFeatured] = useState(false);
   const [icon, setIcon] = useState('auto');
-  const [failed, setFailed] = useState<BulkItem[]>([]);
-  const [busy, setBusy] = useState(false);
+  const { busy, failed, run } = useBulk(closeModal);
   const categories = useMemo(() => distinctOf(data.records, (r) => r.listing?.category), [data.records]);
   const setRow = (i: number, k: 'title' | 'url', v: string) => setRows((p) => p.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
 
-  const save = async () => {
-    setBusy(true);
+  const save = () => {
     const items = rows.map((r) => ({ record_id: r.id, title: r.title, url: r.url.trim() }));
-    const bad = await runBulk('/api/listings/bulk-create', { items, category, tags: splitTags(tags), featured, icon }, (n) => `已上架 ${n} 筆`);
-    setBusy(false);
-    if (bad?.length) setFailed(bad);
-    else if (bad) closeModal();
+    run('/api/listings/bulk-create', { items, category, tags: splitTags(tags), featured, icon }, (n) => `已上架 ${n} 筆`);
   };
 
   return (
@@ -282,7 +264,7 @@ export function BulkListCreateDialog({ ids, data }: { ids: string[]; data: Recor
           標籤 <Tip text="以逗號分隔，最多 6 個。" />
         </label>
         <input id="bl-tags" className="input" value={tags} onChange={(e) => setTags(e.target.value)} />
-        <TagPresets data={data} value={tags} onChange={setTags} />
+        <TagButtons options={splitTags(data.settings.preset_tags)} value={tags} onChange={setTags} />
       </div>
       <label className="check">
         <input type="checkbox" checked={featured} onChange={(e) => setFeatured(e.target.checked)} />
@@ -320,29 +302,24 @@ export function BulkListCreateDialog({ ids, data }: { ids: string[]; data: Recor
 }
 
 export function BulkListEditDialog({ ids, data }: { ids: string[]; data: RecordsData }) {
-  const recs = pick(data, ids).filter((r) => r.listing);
+  const recs = pickRecords(data, ids).filter((r) => r.listing);
   const [on, setOn] = useState({ category: false, featured: false });
   const [category, setCategory] = useState('');
   const [featured, setFeatured] = useState('on');
   const [add, setAdd] = useState('');
   const [remove, setRemove] = useState('');
-  const [failed, setFailed] = useState<BulkItem[]>([]);
   const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
+  const { busy, failed, run } = useBulk(closeModal);
   const categories = useMemo(() => distinctOf(data.records, (r) => r.listing?.category), [data.records]);
-  const used = [...new Set(recs.flatMap((r) => splitTags(r.listing!.tags)))].sort();
+  const used = splitTags(recs.map((r) => r.listing!.tags).join(',')).sort();
 
-  const save = async () => {
+  const save = () => {
     const body: Record<string, unknown> = { ids: recs.map((r) => r.id), add_tags: splitTags(add), remove_tags: splitTags(remove) };
     if (on.category) body.category = category;
     if (on.featured) body.featured = featured === 'on';
     if (!on.category && !on.featured && !splitTags(add).length && !splitTags(remove).length) return setError('請勾選或填寫要修改的欄位');
     setError('');
-    setBusy(true);
-    const bad = await runBulk('/api/listings/bulk-update', body, (n) => `已更新 ${n} 筆入口設定`);
-    setBusy(false);
-    if (bad?.length) setFailed(bad);
-    else if (bad) closeModal();
+    run('/api/listings/bulk-update', body, (n) => `已更新 ${n} 筆入口設定`);
   };
 
   return (
@@ -372,20 +349,12 @@ export function BulkListEditDialog({ ids, data }: { ids: string[]; data: Records
       <div className="field">
         <label htmlFor="ble-add">加入標籤</label>
         <input id="ble-add" className="input" value={add} onChange={(e) => setAdd(e.target.value)} />
-        <TagPresets data={data} value={add} onChange={setAdd} />
+        <TagButtons options={splitTags(data.settings.preset_tags)} value={add} onChange={setAdd} />
       </div>
       <div className="field">
         <label htmlFor="ble-remove">移除標籤</label>
         <input id="ble-remove" className="input" value={remove} onChange={(e) => setRemove(e.target.value)} />
-        <div className="row-gap tag-presets">
-          {used
-            .filter((t) => !splitTags(remove).includes(t))
-            .map((t) => (
-              <button key={t} type="button" className="btn small" onClick={() => setRemove([...splitTags(remove), t].join(', '))}>
-                − {t}
-              </button>
-            ))}
-        </div>
+        <TagButtons options={used} value={remove} onChange={setRemove} sign="−" />
       </div>
     </Dialog>
   );
@@ -393,7 +362,7 @@ export function BulkListEditDialog({ ids, data }: { ids: string[]; data: Records
 
 /** Asks, then takes the listed records among ids off the portal. */
 export async function bulkUnlist(ids: string[], data: RecordsData) {
-  const recs = pick(data, ids).filter((r) => r.listing);
+  const recs = pickRecords(data, ids).filter((r) => r.listing);
   const ok = await confirmDialog({
     title: `從入口下架 ${recs.length} 筆`,
     body: (
@@ -414,31 +383,20 @@ export async function bulkUnlist(ids: string[], data: RecordsData) {
 // ---- issues ----
 
 export function BulkMuteDialog({ ids, data }: { ids: string[]; data: RecordsData }) {
-  const recs = pick(data, ids);
+  const recs = pickRecords(data, ids);
   const count = (kind: string, muted: boolean) => recs.filter((r) => (muted ? r.muted : r.issues).some((i) => i.kind === kind)).length;
   const active = data.kind_order.filter((k) => count(k, false) > 0);
   const muted = data.kind_order.filter((k) => count(k, true) > 0);
   const [mute, setMute] = useState<Set<string>>(new Set());
   const [unmute, setUnmute] = useState<Set<string>>(new Set());
   const [note, setNote] = useState('');
-  const [failed, setFailed] = useState<BulkItem[]>([]);
   const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const toggle = (set: Set<string>, setter: (s: Set<string>) => void, k: string, v: boolean) => {
-    const n = new Set(set);
-    if (v) n.add(k);
-    else n.delete(k);
-    setter(n);
-  };
+  const { busy, failed, run } = useBulk(closeModal);
 
-  const save = async () => {
+  const save = () => {
     if (!mute.size && !unmute.size) return setError('請勾選要忽略或還原的項目');
     setError('');
-    setBusy(true);
-    const bad = await runBulk('/api/issues/bulk-mute', { ids, mute: [...mute], unmute: [...unmute], note }, (n) => `已更新 ${n} 筆`);
-    setBusy(false);
-    if (bad?.length) setFailed(bad);
-    else if (bad) closeModal();
+    run('/api/issues/bulk-mute', { ids, mute: [...mute], unmute: [...unmute], note }, (n) => `已更新 ${n} 筆`);
   };
 
   const list = (kinds: string[], isMuted: boolean) =>
@@ -447,7 +405,7 @@ export function BulkMuteDialog({ ids, data }: { ids: string[]; data: RecordsData
         <input
           type="checkbox"
           checked={(isMuted ? unmute : mute).has(k)}
-          onChange={(e) => (isMuted ? toggle(unmute, setUnmute, k, e.target.checked) : toggle(mute, setMute, k, e.target.checked))}
+          onChange={(e) => (isMuted ? setUnmute : setMute)((p) => toggled(p, k, e.target.checked))}
         />
         {data.kinds[k].label}
         <span className="muted small">{count(k, isMuted)} 筆</span>

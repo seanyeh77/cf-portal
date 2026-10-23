@@ -2,8 +2,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api, errMsg } from '../../shared/api';
 import { fmtDateTimeShort } from '../../shared/format';
-import { Dialog, DialogActions, Tip, toast, TriCheck } from '../../shared/ui';
-import { FailedList, runBulk, type BulkItem } from '../lib/bulk';
+import { Dialog, DialogActions, Tip, toast, toggled, TriCheck } from '../../shared/ui';
+import { FailedList, useBulk } from '../lib/bulk';
 import { refreshRecords, useRecords } from '../lib/data';
 import { PROXIABLE, proxyWarning, REQUEST_TYPES, sub } from '../lib/records';
 import type { RecordsData, RequestItem } from '../types';
@@ -23,13 +23,6 @@ export function Requests() {
   const done = q.data.requests.filter((r) => r.status !== 'pending');
   // Decided requests drop out of the selection.
   const chosen = pending.filter((r) => sel.has(r.id));
-  const toggle = (id: number, on: boolean) =>
-    setSel((p) => {
-      const n = new Set(p);
-      if (on) n.add(id);
-      else n.delete(id);
-      return n;
-    });
   return (
     <div className="requests">
       <div className="page-head">
@@ -65,7 +58,7 @@ export function Requests() {
         <div key={r.id} className="req-card pending" data-testid={'req-' + r.id}>
           <div className="req-head">
             <label className="check-hit" aria-label={'選取 ' + r.name}>
-              <input type="checkbox" checked={sel.has(r.id)} onChange={(e) => toggle(r.id, e.target.checked)} />
+              <input type="checkbox" checked={sel.has(r.id)} onChange={(e) => setSel((p) => toggled(p, r.id, e.target.checked))} />
             </label>
             <strong className="mono">{sub(r.name, data.zone)}</strong>
             <span className="mono small">
@@ -250,15 +243,8 @@ function BulkApproveDialog({ reqs, data, onClose }: { reqs: RequestItem[]; data:
   const [ids, setIds] = useState(() => new Set(reqs.filter((r) => !r.conflict && r.name_ok).map((r) => r.id)));
   const [proxied, setProxied] = useState(false);
   const [note, setNote] = useState('');
-  const [failed, setFailed] = useState<BulkItem[]>([]);
-  const [busy, setBusy] = useState(false);
-  const submit = async () => {
-    setBusy(true);
-    const bad = await runBulk('/api/requests/bulk-approve', { ids: [...ids], proxied, note }, (n) => `已核准 ${n} 筆，連線檢查中`);
-    setBusy(false);
-    if (bad?.length) setFailed(bad);
-    else if (bad) onClose();
-  };
+  const { busy, failed, run } = useBulk(onClose);
+  const submit = () => run('/api/requests/bulk-approve', { ids: [...ids], proxied, note }, (n) => `已核准 ${n} 筆，連線檢查中`);
   return (
     <Dialog
       title={`核准申請（${ids.size} 筆）`}
@@ -276,14 +262,7 @@ function BulkApproveDialog({ reqs, data, onClose }: { reqs: RequestItem[]; data:
               <input
                 type="checkbox"
                 checked={ids.has(r.id)}
-                onChange={(e) =>
-                  setIds((p) => {
-                    const n = new Set(p);
-                    if (e.target.checked) n.add(r.id);
-                    else n.delete(r.id);
-                    return n;
-                  })
-                }
+                onChange={(e) => setIds((p) => toggled(p, r.id, e.target.checked))}
               />
               <span className="mono">{sub(r.name, data.zone)}</span>
               <span className="mono small muted">
@@ -310,15 +289,10 @@ function BulkApproveDialog({ reqs, data, onClose }: { reqs: RequestItem[]; data:
 function BulkRejectDialog({ reqs, onClose }: { reqs: RequestItem[]; onClose: () => void }) {
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
-  const [failed, setFailed] = useState<BulkItem[]>([]);
-  const [busy, setBusy] = useState(false);
-  const submit = async () => {
+  const { busy, failed, run } = useBulk(onClose);
+  const submit = () => {
     if (!note.trim()) return setError('請填寫駁回原因');
-    setBusy(true);
-    const bad = await runBulk('/api/requests/bulk-reject', { ids: reqs.map((r) => r.id), note }, (n) => `已駁回 ${n} 筆`);
-    setBusy(false);
-    if (bad?.length) setFailed(bad);
-    else if (bad) onClose();
+    run('/api/requests/bulk-reject', { ids: reqs.map((r) => r.id), note }, (n) => `已駁回 ${n} 筆`);
   };
   return (
     <Dialog

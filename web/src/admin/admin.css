@@ -603,10 +603,6 @@ dialog.dlg.drawer {
   font-weight: 600;
   margin: 14px 0 8px;
 }
-.tag-presets {
-  margin-top: 6px;
-  flex-wrap: wrap;
-}
 .mute-row {
   display: flex;
   gap: 8px;
