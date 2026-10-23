@@ -1,4 +1,4 @@
-import { Fragment, memo, useEffect, useMemo, type ReactNode } from 'react';
+import { Fragment, memo, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { api, errMsg } from '../../shared/api';
 import { addMonth, relTime, semesterEnd } from '../../shared/format';
 import { MenuButton, Tip, toast, type MenuItem } from '../../shared/ui';
@@ -159,6 +159,32 @@ function ConnDot({ r, pending }: { r: DNSRecord; pending: boolean }) {
   return <span className={'dot ' + dot.state} data-tip={dot.tip || undefined} tabIndex={dot.tip ? 0 : undefined} aria-label={dot.tip || undefined} />;
 }
 
+/** Selects or clears all of rows; shows a mixed state when only some are selected. */
+function SelectAll({ rows, selection, label }: { rows: DNSRecord[]; selection: Set<string>; label: string }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const n = rows.filter((r) => selection.has(r.id)).length;
+  const all = rows.length > 0 && n === rows.length;
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = n > 0 && !all;
+  }, [n, all]);
+  return (
+    <label className="check-hit" aria-label={label}>
+      <input
+        ref={ref}
+        type="checkbox"
+        checked={all}
+        onChange={() =>
+          selectionStore.set((prev) => {
+            const next = new Set(prev);
+            rows.forEach((r) => (all ? next.delete(r.id) : next.add(r.id)));
+            return next;
+          })
+        }
+      />
+    </label>
+  );
+}
+
 /** One table row. Memoized: polling keeps unchanged record objects stable. */
 const Row = memo(function Row({
   r,
@@ -311,7 +337,6 @@ function RecordsView({ data }: { data: RecordsData }) {
   const anyFilter = desc.length > 0;
   const allIds = useMemo(() => new Set(data.records.map((r) => r.id)), [data.records]);
   const selectedIds = Array.from(selection).filter((id) => allIds.has(id));
-  const allChecked = sorted.length > 0 && sorted.every((r) => selection.has(r.id));
 
   // Clear selections of records that no longer exist.
   useEffect(() => {
@@ -553,19 +578,7 @@ function RecordsView({ data }: { data: RecordsData }) {
           <thead>
             <tr>
               <th className="c-check">
-                <label className="check-hit" aria-label="全選目前篩選結果">
-                  <input
-                    type="checkbox"
-                    checked={allChecked}
-                    onChange={(e) =>
-                      selectionStore.set((prev) => {
-                        const n = new Set(prev);
-                        sorted.forEach((r) => (e.target.checked ? n.add(r.id) : n.delete(r.id)));
-                        return n;
-                      })
-                    }
-                  />
-                </label>
+                <SelectAll rows={sorted} selection={selection} label="全選目前篩選結果" />
               </th>
               <SortHead k="type" label="類型" sort={view.sort} />
               <SortHead k="name" label="名稱" sort={view.sort} />
@@ -595,7 +608,10 @@ function RecordsView({ data }: { data: RecordsData }) {
                   ...groups.out.map(([k, rows]) => (
                     <Fragment key={k}>
                       <tr className="group-head">
-                        <td colSpan={cols}>
+                        <td className="c-check">
+                          <SelectAll rows={rows} selection={selection} label={`選取指向 ${rows[0].tunnel ? 'Tunnel ' + tunnelName(rows[0].tunnel) : k} 的 ${rows.length} 筆`} />
+                        </td>
+                        <td colSpan={cols - 1}>
                           → {rows[0].tunnel ? <>Tunnel <span className="mono">{tunnelName(rows[0].tunnel)}</span></> : <span className="mono">{k}</span>}（{rows.length} 筆）
                           <button
                             type="button"
@@ -616,7 +632,10 @@ function RecordsView({ data }: { data: RecordsData }) {
                   groups.other.length > 0 && (
                     <Fragment key="__other">
                       <tr className="group-head">
-                        <td colSpan={cols}>其他（{groups.other.length} 筆）</td>
+                        <td className="c-check">
+                          <SelectAll rows={groups.other} selection={selection} label={`選取其他 ${groups.other.length} 筆`} />
+                        </td>
+                        <td colSpan={cols - 1}>其他（{groups.other.length} 筆）</td>
                       </tr>
                       {groups.other.map(renderRow)}
                     </Fragment>

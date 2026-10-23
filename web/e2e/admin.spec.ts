@@ -111,6 +111,15 @@ test('tunnel records show the tunnel and can be managed as a group', async ({ pa
   await expect(row(page, 'tun-gone').locator('td.c-status')).toContainText('緊急：Tunnel 不存在');
   await page.getByRole('button', { name: '依目標分組' }).click();
   const head = page.locator('tr.group-head', { hasText: 'Tunnel home-lab（2 筆）' });
+  const groupBox = head.getByRole('checkbox', { name: '選取指向 Tunnel home-lab 的 2 筆' });
+  await row(page, 'tun-app').getByRole('checkbox').check();
+  await expect(groupBox).not.toBeChecked();
+  expect(await groupBox.evaluate((el: HTMLInputElement) => el.indeterminate)).toBe(true);
+  await groupBox.click();
+  await expect(groupBox).toBeChecked();
+  await expect(page.locator('.bulkbar')).toContainText('已選 2 筆');
+  await groupBox.click();
+  await expect(page.locator('.bulkbar')).toHaveCount(0);
   await head.getByRole('button', { name: '設定此組管理資訊' }).click();
   const dlg = page.getByTestId('bulk-meta');
   await dlg.getByLabel('修改用途').check();
