@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nycu-sdc/sdc-portal/testdata/mockcf"
+	"github.com/seanyeh77/cf-portal/testdata/mockcf"
 )
 
 func TestSniff(t *testing.T) {

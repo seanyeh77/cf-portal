@@ -5,20 +5,20 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nycu-sdc/sdc-portal/internal/model"
+	"github.com/seanyeh77/cf-portal/internal/model"
 )
 
-const zone = "sdc.nycu.club"
+const zone = "example.org"
 
 func TestNormalizeName(t *testing.T) {
 	cases := map[string]string{
-		"grafana":                "grafana.sdc.nycu.club",
-		"@":                      "sdc.nycu.club",
-		"":                       "sdc.nycu.club",
-		"  ":                     "sdc.nycu.club",
-		"Grafana.SDC.nycu.club.": "grafana.sdc.nycu.club",
-		"a.b":                    "a.b.sdc.nycu.club",
-		"sdc.nycu.club":          "sdc.nycu.club",
+		"grafana":              "grafana.example.org",
+		"@":                    "example.org",
+		"":                     "example.org",
+		"  ":                   "example.org",
+		"Grafana.example.org.": "grafana.example.org",
+		"a.b":                  "a.b.example.org",
+		"example.org":          "example.org",
 	}
 	for in, want := range cases {
 		if got := NormalizeName(in, zone); got != want {
@@ -45,7 +45,7 @@ func TestValidate(t *testing.T) {
 		{"cname sub localhost", model.RecordInput{Type: "CNAME", Name: "x", Content: "app.localhost."}, "CNAME 目標為 localhost"},
 		{"cname ip", model.RecordInput{Type: "CNAME", Name: "x", Content: "10.0.0.1"}, "CNAME 目標為 IP 位址，請改用 A 或 AAAA record"},
 		{"cname nodot", model.RecordInput{Type: "CNAME", Name: "x", Content: "gitlab"}, "CNAME 目標不是完整網域"},
-		{"cname self", model.RecordInput{Type: "CNAME", Name: "x", Content: "x.sdc.nycu.club."}, "CNAME 不可指向自己"},
+		{"cname self", model.RecordInput{Type: "CNAME", Name: "x", Content: "x.example.org."}, "CNAME 不可指向自己"},
 		{"cname ok", model.RecordInput{Type: "CNAME", Name: "x", Content: "Me.GitHub.io."}, ""},
 		{"mx no prio", model.RecordInput{Type: "MX", Name: "@", Content: "mx.example.com"}, "MX records need a priority"},
 		{"mx ok", model.RecordInput{Type: "MX", Name: "@", Content: "mx.example.com", Priority: new(10)}, ""},
@@ -70,7 +70,7 @@ func TestValidate(t *testing.T) {
 		}
 	}
 	in := model.RecordInput{Type: "a", Name: "Grafana", Content: "1.2.3.4", TTL: 300, Proxied: true}
-	if err := Validate(&in, zone); err != nil || in.TTL != 1 || in.Type != "A" || in.Name != "grafana.sdc.nycu.club" {
+	if err := Validate(&in, zone); err != nil || in.TTL != 1 || in.Type != "A" || in.Name != "grafana.example.org" {
 		t.Errorf("normalization failed: %+v %v", in, err)
 	}
 	in = model.RecordInput{Type: "TXT", Name: "x", Content: "v", Proxied: true}
@@ -81,23 +81,23 @@ func TestValidate(t *testing.T) {
 
 func TestConflict(t *testing.T) {
 	existing := []model.Record{
-		{ID: "1", RecordInput: model.RecordInput{Type: "A", Name: "gitlab.sdc.nycu.club", Content: "10.0.1.21"}},
-		{ID: "2", RecordInput: model.RecordInput{Type: "CNAME", Name: "docs.sdc.nycu.club", Content: "sdc-docs.pages.dev"}},
-		{ID: "3", RecordInput: model.RecordInput{Type: "TXT", Name: "gitlab.sdc.nycu.club", Content: "hello"}},
+		{ID: "1", RecordInput: model.RecordInput{Type: "A", Name: "gitlab.example.org", Content: "10.0.1.21"}},
+		{ID: "2", RecordInput: model.RecordInput{Type: "CNAME", Name: "docs.example.org", Content: "docs-site.pages.dev"}},
+		{ID: "3", RecordInput: model.RecordInput{Type: "TXT", Name: "gitlab.example.org", Content: "hello"}},
 	}
 	cases := []struct {
 		in      model.RecordInput
 		exclude string
 		want    string
 	}{
-		{model.RecordInput{Type: "A", Name: "gitlab.sdc.nycu.club", Content: "10.0.1.21"}, "", "已有相同的 A record"},
-		{model.RecordInput{Type: "A", Name: "gitlab.sdc.nycu.club", Content: "10.0.1.22"}, "", ""},
-		{model.RecordInput{Type: "A", Name: "gitlab.sdc.nycu.club", Content: "10.0.1.21"}, "1", ""},
-		{model.RecordInput{Type: "CNAME", Name: "gitlab.sdc.nycu.club", Content: "x.example.com"}, "", "gitlab.sdc.nycu.club 已有 A record，CNAME 不可與其他 record 同名"},
-		{model.RecordInput{Type: "A", Name: "docs.sdc.nycu.club", Content: "1.2.3.4"}, "", "docs.sdc.nycu.club 已有 CNAME record，CNAME 不可與其他 record 同名"},
-		{model.RecordInput{Type: "CNAME", Name: "docs.sdc.nycu.club", Content: "SDC-docs.pages.dev."}, "", "已有相同的 CNAME record"},
-		{model.RecordInput{Type: "CNAME", Name: "docs.sdc.nycu.club", Content: "other.pages.dev"}, "2", ""},
-		{model.RecordInput{Type: "TXT", Name: "docs.sdc.nycu.club", Content: "x"}, "", ""},
+		{model.RecordInput{Type: "A", Name: "gitlab.example.org", Content: "10.0.1.21"}, "", "已有相同的 A record"},
+		{model.RecordInput{Type: "A", Name: "gitlab.example.org", Content: "10.0.1.22"}, "", ""},
+		{model.RecordInput{Type: "A", Name: "gitlab.example.org", Content: "10.0.1.21"}, "1", ""},
+		{model.RecordInput{Type: "CNAME", Name: "gitlab.example.org", Content: "x.example.com"}, "", "gitlab.example.org 已有 A record，CNAME 不可與其他 record 同名"},
+		{model.RecordInput{Type: "A", Name: "docs.example.org", Content: "1.2.3.4"}, "", "docs.example.org 已有 CNAME record，CNAME 不可與其他 record 同名"},
+		{model.RecordInput{Type: "CNAME", Name: "docs.example.org", Content: "Docs-site.pages.dev."}, "", "已有相同的 CNAME record"},
+		{model.RecordInput{Type: "CNAME", Name: "docs.example.org", Content: "other.pages.dev"}, "2", ""},
+		{model.RecordInput{Type: "TXT", Name: "docs.example.org", Content: "x"}, "", ""},
 	}
 	for i, c := range cases {
 		err := Conflict(c.in, existing, c.exclude)
@@ -115,41 +115,41 @@ func TestConflict(t *testing.T) {
 }
 
 func TestNameRule(t *testing.T) {
-	ok := []string{"grafana.sdc.nycu.club", "hpc-grafana.sdc.nycu.club", "_dmarc.sdc.nycu.club", "*.lab.sdc.nycu.club", "sdc.nycu.club", "_acme-challenge.Old.sdc.nycu.club"}
+	ok := []string{"grafana.example.org", "hpc-grafana.example.org", "_dmarc.example.org", "*.lab.example.org", "example.org", "_acme-challenge.Old.example.org"}
 	for _, n := range ok {
 		if e := NameRuleError(n, zone, ""); e != "" && !strings.Contains(n, "Old") {
 			t.Errorf("%s: unexpected %s", n, e)
 		}
 	}
-	bad := []string{"Old_Box.sdc.nycu.club", "-x.sdc.nycu.club", "x-.sdc.nycu.club", "a_b.sdc.nycu.club"}
+	bad := []string{"Old_Box.example.org", "-x.example.org", "x-.example.org", "a_b.example.org"}
 	for _, n := range bad {
 		if NameRuleError(n, zone, "") == "" {
 			t.Errorf("%s should break the rule", n)
 		}
 	}
-	if NameRuleError("grafana.sdc.nycu.club", zone, `hpc-.*`) == "" {
+	if NameRuleError("grafana.example.org", zone, `hpc-.*`) == "" {
 		t.Error("custom rule should apply")
 	}
-	if NameRuleError("hpc-grafana.sdc.nycu.club", zone, `hpc-.*`) != "" {
+	if NameRuleError("hpc-grafana.example.org", zone, `hpc-.*`) != "" {
 		t.Error("custom rule should match")
 	}
-	if NameRuleError("_dmarc.sdc.nycu.club", zone, `hpc-.*`) != "" {
+	if NameRuleError("_dmarc.example.org", zone, `hpc-.*`) != "" {
 		t.Error("custom rule skips names with _ labels")
 	}
-	if NameRuleError("grafana.sdc.nycu.club", zone, `([`) != "" {
+	if NameRuleError("grafana.example.org", zone, `([`) != "" {
 		t.Error("invalid custom rule must pass")
 	}
 }
 
 func TestGroup(t *testing.T) {
 	cases := map[string]string{
-		"student001.sdc.nycu.club": "student",
-		"hpc-alice.sdc.nycu.club":  "hpc",
-		"_dmarc.sdc.nycu.club":     "_系統",
-		"grafana.sdc.nycu.club":    "grafana",
-		"a.b.sdc.nycu.club":        "a",
-		"sdc.nycu.club":            "",
-		"123.sdc.nycu.club":        "123",
+		"student001.example.org": "student",
+		"hpc-alice.example.org":  "hpc",
+		"_dmarc.example.org":     "_系統",
+		"grafana.example.org":    "grafana",
+		"a.b.example.org":        "a",
+		"example.org":            "",
+		"123.example.org":        "123",
 	}
 	for in, want := range cases {
 		if got := Group(in, zone); got != want {

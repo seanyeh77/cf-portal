@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/nycu-sdc/sdc-portal/internal/model"
+	"github.com/seanyeh77/cf-portal/internal/model"
 )
 
 func TestMigrationAddsColumns(t *testing.T) {
@@ -125,11 +125,11 @@ func TestAuditIndexesRecordID(t *testing.T) {
 	}
 	defer s.Close()
 	ctx := context.Background()
-	s.AddAudit(ctx, "10.0.0.1", "record_update", "old.sdc.nycu.club", `{"record_id":"r1"}`)
+	s.AddAudit(ctx, "10.0.0.1", "record_update", "old.example.org", `{"record_id":"r1"}`)
 	s.AddAudit(ctx, "10.0.0.1", "login", "admin", `{}`)
 	// Found by id even though the record has been renamed since.
-	rows, err := s.AuditForRecord(ctx, "r1", "new.sdc.nycu.club")
-	if err != nil || len(rows) != 1 || rows[0].Target != "old.sdc.nycu.club" {
+	rows, err := s.AuditForRecord(ctx, "r1", "new.example.org")
+	if err != nil || len(rows) != 1 || rows[0].Target != "old.example.org" {
 		t.Fatalf("history by record id: %v %v", rows, err)
 	}
 }

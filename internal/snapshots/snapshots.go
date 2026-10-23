@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nycu-sdc/sdc-portal/internal/dnsrec"
-	"github.com/nycu-sdc/sdc-portal/internal/model"
+	"github.com/seanyeh77/cf-portal/internal/dnsrec"
+	"github.com/seanyeh77/cf-portal/internal/model"
 )
 
 // NameRe matches snapshot file names.

@@ -17,16 +17,16 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/nycu-sdc/sdc-portal/internal/assets"
-	"github.com/nycu-sdc/sdc-portal/internal/auth"
-	"github.com/nycu-sdc/sdc-portal/internal/cloudflare"
-	"github.com/nycu-sdc/sdc-portal/internal/config"
-	"github.com/nycu-sdc/sdc-portal/internal/health"
-	"github.com/nycu-sdc/sdc-portal/internal/model"
-	"github.com/nycu-sdc/sdc-portal/internal/scanner"
-	"github.com/nycu-sdc/sdc-portal/internal/snapshots"
-	"github.com/nycu-sdc/sdc-portal/internal/store"
-	"github.com/nycu-sdc/sdc-portal/testdata/mockcf"
+	"github.com/seanyeh77/cf-portal/internal/assets"
+	"github.com/seanyeh77/cf-portal/internal/auth"
+	"github.com/seanyeh77/cf-portal/internal/cloudflare"
+	"github.com/seanyeh77/cf-portal/internal/config"
+	"github.com/seanyeh77/cf-portal/internal/health"
+	"github.com/seanyeh77/cf-portal/internal/model"
+	"github.com/seanyeh77/cf-portal/internal/scanner"
+	"github.com/seanyeh77/cf-portal/internal/snapshots"
+	"github.com/seanyeh77/cf-portal/internal/store"
+	"github.com/seanyeh77/cf-portal/testdata/mockcf"
 )
 
 const testPassword = "correct horse battery"
@@ -61,7 +61,7 @@ func newEnv(t *testing.T, mut ...func(*config.Config)) *env {
 	t.Cleanup(cfsrv.Close)
 	dir := t.TempDir()
 	vars := map[string]string{
-		"CF_API_TOKEN": "tok", "CF_API_BASE": cfsrv.URL + "/client/v4", "ADMIN_PASSWORD_HASH": pwHash,
+		"CF_API_TOKEN": "tok", "CF_ZONE_NAME": mockcf.Zone, "CF_API_BASE": cfsrv.URL + "/client/v4", "ADMIN_PASSWORD_HASH": pwHash,
 		"SECRET_KEY": strings.Repeat("s", 32), "COOKIE_SECURE": "false", "DB_PATH": filepath.Join(dir, "portal.db"),
 		"SIMPLE_ICONS_BASE": cfsrv.URL + "/si", "SCAN_TIMEOUT": "0.05",
 	}
@@ -199,5 +199,5 @@ func (e *env) audits() []map[string]any {
 }
 
 func modelRequest(i int) model.Request {
-	return model.Request{Token: fmt.Sprintf("tok%d", i), IP: "10.9.9.9", Requester: "x", Contact: "x", Name: fmt.Sprintf("bulk%d.sdc.nycu.club", i), Type: "A", Content: "10.0.0.1", Purpose: "x"}
+	return model.Request{Token: fmt.Sprintf("tok%d", i), IP: "10.9.9.9", Requester: "x", Contact: "x", Name: fmt.Sprintf("bulk%d.example.org", i), Type: "A", Content: "10.0.0.1", Purpose: "x"}
 }

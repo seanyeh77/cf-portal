@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nycu-sdc/sdc-portal/testdata/mockcf"
+	"github.com/seanyeh77/cf-portal/testdata/mockcf"
 )
 
 func findRec(t *testing.T, data map[string]any, name string) map[string]any {
@@ -56,7 +56,7 @@ func TestCreateUpdateDelete(t *testing.T) {
 		t.Fatalf("loopback: %d %s", w.Code, w.Body.String())
 	}
 	if w := e.do("POST", "/api/records", map[string]any{"type": "CNAME", "name": "gitlab", "content": "x.example.com"}); w.Code != 409 ||
-		!strings.Contains(w.Body.String(), "gitlab.sdc.nycu.club 已有 A record，CNAME 不可與其他 record 同名") {
+		!strings.Contains(w.Body.String(), "gitlab.example.org 已有 A record，CNAME 不可與其他 record 同名") {
 		t.Fatalf("conflict: %d %s", w.Code, w.Body.String())
 	}
 	if w := e.do("POST", "/api/records", map[string]any{"type": "A", "name": "git", "content": "10.0.1.21"}); w.Code != 409 ||
@@ -77,7 +77,7 @@ func TestCreateUpdateDelete(t *testing.T) {
 		"meta": map[string]any{"owner": "王小明", "purpose": "監控", "expires_at": "2026-12-31"}}), 201)
 	rec := res["record"].(map[string]any)
 	id := rec["id"].(string)
-	if rec["name"] != "grafana2.sdc.nycu.club" {
+	if rec["name"] != "grafana2.example.org" {
 		t.Fatalf("name %v", rec["name"])
 	}
 	// meta-only update does not call Cloudflare
@@ -132,7 +132,7 @@ func TestCreateUpdateDelete(t *testing.T) {
 		t.Fatalf("delete audit %v", a[0])
 	}
 	// history finds all audit rows of the record
-	hist := e.mustOK(e.do("GET", "/api/records/"+id+"/history?name=grafana2.sdc.nycu.club", nil))
+	hist := e.mustOK(e.do("GET", "/api/records/"+id+"/history?name=grafana2.example.org", nil))
 	if n := len(hist["entries"].([]any)); n < 5 {
 		t.Fatalf("history %d", n)
 	}
@@ -255,7 +255,7 @@ func TestSnapshotsAPI(t *testing.T) {
 		t.Fatalf("diff %v", diff)
 	}
 	w := e.do("GET", "/api/snapshots/"+name+"/download?format=zone", nil)
-	if w.Code != 200 || !strings.Contains(w.Body.String(), "$ORIGIN sdc.nycu.club.") || !strings.Contains(w.Body.String(), "grafana.sdc.nycu.club.\t300\tIN\tA\t10.0.1.20") {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "$ORIGIN example.org.") || !strings.Contains(w.Body.String(), "grafana.example.org.\t300\tIN\tA\t10.0.1.20") {
 		t.Fatalf("zone %s", w.Body.String())
 	}
 	if w := e.do("GET", "/api/snapshots/..%2f..%2fportal.db/download", nil); w.Code == 200 {
@@ -281,13 +281,13 @@ func TestExportCSV(t *testing.T) {
 	if lines[0] != strings.Join(exportHeader, ",") {
 		t.Fatalf("header %q", lines[0])
 	}
-	if !strings.Contains(body, `grafana.sdc.nycu.club,A,10.0.1.20,false,300,,"陳, 同學",監控`) {
+	if !strings.Contains(body, `grafana.example.org,A,10.0.1.20,false,300,,"陳, 同學",監控`) {
 		t.Fatalf("row missing:\n%s", body)
 	}
 	if !strings.Contains(body, `"'=HYPERLINK(""x"")"`) {
 		t.Fatalf("formula not neutralized:\n%s", body)
 	}
-	if !strings.Contains(body, "student019.sdc.nycu.club,A,10.0.3.119,false,1,,,,,,false,false,,,student,,,未指派負責人") {
+	if !strings.Contains(body, "student019.example.org,A,10.0.3.119,false,1,,,,,,false,false,,,student,,,未指派負責人") {
 		t.Fatalf("student row:\n%s", body)
 	}
 }
@@ -348,7 +348,7 @@ func TestRequestFlow(t *testing.T) {
 	var id float64
 	for _, q := range list {
 		m := q.(map[string]any)
-		if m["name"] == "chen-blog.sdc.nycu.club" {
+		if m["name"] == "chen-blog.example.org" {
 			id = m["id"].(float64)
 			if m["conflict"] != "" || m["name_ok"] != true {
 				t.Errorf("request flags %v", m)
@@ -421,11 +421,11 @@ func TestListingsAndSettings(t *testing.T) {
 	e.login()
 	g := e.mock.Find("A", "gitlab")
 	// Simple Icons
-	out := e.mustOK(e.do("PUT", "/api/listings/"+g.ID, map[string]any{"title": "GitLab", "category": "開發工具", "icon": "si:gitlab", "tags": []string{"需帳號", "社員限定"}}))
+	out := e.mustOK(e.do("PUT", "/api/listings/"+g.ID, map[string]any{"title": "GitLab", "category": "開發工具", "icon": "si:gitlab", "tags": []string{"需帳號", "成員限定"}}))
 	if out["icon_error"] != "" || out["listing"].(map[string]any)["icon_url"] != "/icons/si-gitlab.svg" {
 		t.Fatalf("si %v", out)
 	}
-	out = e.mustOK(e.do("PUT", "/api/listings/"+g.ID, map[string]any{"title": "GitLab", "category": "開發工具", "icon": "si:missing", "tags": []string{"需帳號", "社員限定"}}))
+	out = e.mustOK(e.do("PUT", "/api/listings/"+g.ID, map[string]any{"title": "GitLab", "category": "開發工具", "icon": "si:missing", "tags": []string{"需帳號", "成員限定"}}))
 	if out["icon_error"] != "Simple Icons 查無 missing，暫以文字圖示顯示" {
 		t.Fatalf("si missing %v", out)
 	}
@@ -443,7 +443,7 @@ func TestListingsAndSettings(t *testing.T) {
 	// portal.json lists it
 	p := e.mustOK(e.do("GET", "/portal.json", nil))
 	svc := p["services"].([]any)[0].(map[string]any)
-	if svc["title"] != "GitLab" || svc["url"] != "https://gitlab.sdc.nycu.club" || len(svc["tags"].([]any)) != 2 {
+	if svc["title"] != "GitLab" || svc["url"] != "https://gitlab.example.org" || len(svc["tags"].([]any)) != 2 {
 		t.Fatalf("portal %v", svc)
 	}
 	if _, ok := p["site"].(map[string]any)["name_rule"]; ok {
@@ -453,8 +453,8 @@ func TestListingsAndSettings(t *testing.T) {
 	if w := e.do("PUT", "/api/settings", map[string]any{"name_rule": "(["}); w.Code != 422 {
 		t.Fatal("invalid regexp accepted")
 	}
-	s := e.mustOK(e.do("PUT", "/api/settings", map[string]any{"scan_ports": "22, 443 22", "title": "SDC"}))
-	if s["scan_ports"] != "22,443" || s["title"] != "SDC" || s["accent"] != "#2dd4bf" {
+	s := e.mustOK(e.do("PUT", "/api/settings", map[string]any{"scan_ports": "22, 443 22", "title": "Lab"}))
+	if s["scan_ports"] != "22,443" || s["title"] != "Lab" || s["accent"] != "#2dd4bf" {
 		t.Fatalf("settings %v", s)
 	}
 	if w := e.upload("/api/settings/media/hero", "h.svg", []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`)); w.Code != 422 {

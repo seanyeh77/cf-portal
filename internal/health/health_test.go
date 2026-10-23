@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nycu-sdc/sdc-portal/internal/model"
-	"github.com/nycu-sdc/sdc-portal/internal/store"
-	"github.com/nycu-sdc/sdc-portal/testdata/mockcf"
+	"github.com/seanyeh77/cf-portal/internal/model"
+	"github.com/seanyeh77/cf-portal/internal/store"
+	"github.com/seanyeh77/cf-portal/testdata/mockcf"
 )
 
 func TestSummaries(t *testing.T) {

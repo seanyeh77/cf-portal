@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nycu-sdc/sdc-portal/internal/assets"
-	"github.com/nycu-sdc/sdc-portal/internal/scanner"
-	"github.com/nycu-sdc/sdc-portal/internal/snapshots"
+	"github.com/seanyeh77/cf-portal/internal/assets"
+	"github.com/seanyeh77/cf-portal/internal/scanner"
+	"github.com/seanyeh77/cf-portal/internal/snapshots"
 )
 
 var hexColor = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)

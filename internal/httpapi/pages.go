@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nycu-sdc/sdc-portal/internal/assets"
-	"github.com/nycu-sdc/sdc-portal/internal/auth"
-	"github.com/nycu-sdc/sdc-portal/internal/model"
-	"github.com/nycu-sdc/sdc-portal/internal/webui"
+	"github.com/seanyeh77/cf-portal/internal/assets"
+	"github.com/seanyeh77/cf-portal/internal/auth"
+	"github.com/seanyeh77/cf-portal/internal/model"
+	"github.com/seanyeh77/cf-portal/internal/webui"
 )
 
 func (s *Server) writePage(w http.ResponseWriter, status int, entry string, data any) {

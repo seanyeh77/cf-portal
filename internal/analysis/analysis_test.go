@@ -4,10 +4,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nycu-sdc/sdc-portal/internal/model"
+	"github.com/seanyeh77/cf-portal/internal/model"
 )
 
-const zone = "sdc.nycu.club"
+const zone = "example.org"
 
 var (
 	taipei, _ = time.LoadLocation("Asia/Taipei")
@@ -94,7 +94,7 @@ func TestLoopback(t *testing.T) {
 func TestDangling(t *testing.T) {
 	fx := newFixture(
 		rec("1", "CNAME", "a", "gone.example.com"),
-		rec("2", "CNAME", "b", "c.sdc.nycu.club"),
+		rec("2", "CNAME", "b", "c.example.org"),
 		rec("3", "A", "c", "10.0.0.1"),
 		rec("4", "CNAME", "d", "localhost"),
 		rec("5", "CNAME", "e", "fine.example.com"),
@@ -155,21 +155,21 @@ func TestExpiry(t *testing.T) {
 func TestUpstreamChain(t *testing.T) {
 	fx := newFixture(
 		rec("alias", "CNAME", "alias", "localhost"),
-		rec("chain", "CNAME", "chain", "alias.sdc.nycu.club"),
-		rec("chain2", "CNAME", "chain2", "chain.sdc.nycu.club."),
-		rec("chain3", "CNAME", "chain3", "chain2.sdc.nycu.club"),
+		rec("chain", "CNAME", "chain", "alias.example.org"),
+		rec("chain2", "CNAME", "chain2", "chain.example.org."),
+		rec("chain3", "CNAME", "chain3", "chain2.example.org"),
 		rec("ok", "A", "ok", "10.0.0.1"),
-		rec("okc", "CNAME", "okc", "ok.sdc.nycu.club"),
+		rec("okc", "CNAME", "okc", "ok.example.org"),
 		rec("loopA", "A", "loop", "127.0.0.1"),
-		rec("toloop", "CNAME", "toloop", "loop.sdc.nycu.club"),
-		rec("cyc1", "CNAME", "cyc1", "cyc2.sdc.nycu.club"),
-		rec("cyc2", "CNAME", "cyc2", "cyc1.sdc.nycu.club"),
+		rec("toloop", "CNAME", "toloop", "loop.example.org"),
+		rec("cyc1", "CNAME", "cyc1", "cyc2.example.org"),
+		rec("cyc2", "CNAME", "cyc2", "cyc1.example.org"),
 	)
 	r := fx.run()
-	if got := issue(r, "chain", "upstream_broken"); got.Detail != "上游 alias.sdc.nycu.club：CNAME 目標無效" || got.Upstream != "alias" {
+	if got := issue(r, "chain", "upstream_broken"); got.Detail != "上游 alias.example.org：CNAME 目標無效" || got.Upstream != "alias" {
 		t.Errorf("chain: %+v", got)
 	}
-	if got := issue(r, "chain2", "upstream_broken"); got.Detail != "上游 chain.sdc.nycu.club：受上游影響" || got.Upstream != "chain" {
+	if got := issue(r, "chain2", "upstream_broken"); got.Detail != "上游 chain.example.org：受上游影響" || got.Upstream != "chain" {
 		t.Errorf("chain2: %+v", got)
 	}
 	if !has(r, "chain3", "upstream_broken") {
@@ -193,7 +193,7 @@ func TestUpstreamChain(t *testing.T) {
 }
 
 func TestUpstreamDangling(t *testing.T) {
-	fx := newFixture(rec("1", "CNAME", "pages", "gone.github.io"), rec("2", "CNAME", "www", "pages.sdc.nycu.club"))
+	fx := newFixture(rec("1", "CNAME", "pages", "gone.github.io"), rec("2", "CNAME", "www", "pages.example.org"))
 	fx.scans["1"] = model.Scan{LastTS: 1, DNSStatus: "unclaimed"}
 	r := fx.run()
 	if !has(r, "2", "upstream_broken") {

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nycu-sdc/sdc-portal/internal/dnsrec"
-	"github.com/nycu-sdc/sdc-portal/internal/model"
-	"github.com/nycu-sdc/sdc-portal/internal/store"
+	"github.com/seanyeh77/cf-portal/internal/dnsrec"
+	"github.com/seanyeh77/cf-portal/internal/model"
+	"github.com/seanyeh77/cf-portal/internal/store"
 )
 
 const (

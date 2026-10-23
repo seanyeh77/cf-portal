@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nycu-sdc/sdc-portal/internal/httpclient"
+	"github.com/seanyeh77/cf-portal/internal/httpclient"
 )
 
 // NameRe matches the file names this system serves.
@@ -126,7 +126,7 @@ func (f *Fetcher) get(ctx context.Context, u string, limit int64) ([]byte, *url.
 	if err != nil {
 		return nil, nil, err
 	}
-	req.Header.Set("User-Agent", "sdc-portal/1.0 (+icon fetch)")
+	req.Header.Set("User-Agent", "cf-portal/1.0 (+icon fetch)")
 	resp, err := f.Client.Do(req)
 	if err != nil {
 		return nil, nil, err

@@ -1,10 +1,10 @@
-# sdc.nycu.club 服務入口與 DNS 管理後台
+# Cloudflare 服務入口與 DNS 管理後台
 
-管理 NYCU SDC 在 Cloudflare 上的網域 `sdc.nycu.club`：
+管理 Cloudflare 上的一個 zone（例如 `example.org`）的服務入口與 DNS 後台，適用於任何社群、實驗室或團隊：
 
-- 服務入口 `/`：社員查看目前有哪些服務、網址與是否正常。
+- 服務入口 `/`：使用者查看目前有哪些服務、網址與是否正常。
 - 管理後台 `/admin`：讀寫 Cloudflare DNS record，記錄負責人、用途與到期日，找出有問題的 record，修改前顯示差異，所有變更可還原。
-- 網域申請 `/request`：社員申請子網域，管理者審核後自動建立。
+- 網域申請 `/request`：使用者申請子網域，管理者審核後自動建立。
 
 單一 Go 執行檔（前端以 `embed` 內嵌）＋ SQLite，部署為一個 container 與一個 volume。
 
@@ -36,7 +36,7 @@ Cloudflare 控制台 → My Profile → API Tokens → Create Token → Custom t
 | Zone · DNS | Edit |
 | Zone · Zone | Read |
 
-Zone Resources 選 **Include · Specific zone · sdc.nycu.club**，不要授權其他 zone。可加上 Client IP Address Filtering 限定這台主機的對外 IP。
+Zone Resources 選 **Include · Specific zone · example.org**，不要授權其他 zone。可加上 Client IP Address Filtering 限定這台主機的對外 IP。
 若想省去啟動時以名稱查詢 zone id，可在 Overview 頁右下角複製 Zone ID 填入 `CF_ZONE_ID`。
 
 ## 3. 密碼雜湊與 SECRET_KEY
@@ -53,7 +53,7 @@ Zone Resources 選 **Include · Specific zone · sdc.nycu.club**，不要授權�
 - `ADMIN_ALLOWED_CIDRS`：`/admin`、`/api/*`、`/login`、`/logout`。
 - 不在清單內回 403「此頁面只開放內部網路或 VPN 存取。」。IPv4-mapped IPv6（`::ffff:10.0.0.1`）會先轉回 IPv4 再比對。
 
-**wg-easy（WireGuard）**：wg-easy 會做 NAT，社員經 VPN 連入時，本系統看到的來源 IP 是 **wg-easy 那台 VM 的內網 IP**，不是 WireGuard 位址（例如 10.8.0.x）。因此：
+**wg-easy（WireGuard）**：wg-easy 會做 NAT，使用者經 VPN 連入時，本系統看到的來源 IP 是 **wg-easy 那台 VM 的內網 IP**，不是 WireGuard 位址（例如 10.8.0.x）。因此：
 
 - 只要 wg-easy VM 的內網 IP 在 `ALLOWED_CIDRS` 內，所有 VPN 使用者都能開啟入口。
 - 若只想讓少數人進後台，`ADMIN_ALLOWED_CIDRS` 不能用 VPN 區分個人（大家都是同一個 NAT IP），只能靠帳號密碼；或另設不經 NAT 的管理網段。
@@ -72,7 +72,7 @@ Zone Resources 選 **Include · Specific zone · sdc.nycu.club**，不要授權�
 Caddy 範例：
 
 ```caddy
-sdc-portal.internal.example {
+cf-portal.internal.example {
     tls internal
     reverse_proxy portal:8080
 }
@@ -112,7 +112,7 @@ DNS record 本身存在 Cloudflare，快照可作為額外備份。備份範例�
 
 ```sh
 docker compose stop portal
-docker run --rm -v sdc-portal_portal-data:/data -v "$PWD":/backup alpine \
+docker run --rm -v cf-portal_portal-data:/data -v "$PWD":/backup alpine \
   tar czf /backup/portal-data-$(date +%F).tgz -C /data .
 docker compose start portal
 ```
@@ -124,7 +124,7 @@ docker compose start portal
 | 變數 | 預設 | 說明 |
 |---|---|---|
 | `CF_API_TOKEN` | 必填 | Cloudflare API token（Zone.DNS:Edit、Zone.Zone:Read，限定此 zone） |
-| `CF_ZONE_NAME` | `sdc.nycu.club` | 管理的 zone |
+| `CF_ZONE_NAME` | 必填 | 管理的 zone，例如 `example.org` |
 | `CF_ZONE_ID` | 空 | 選填；有設就不用名稱查 zone id |
 | `CF_API_BASE` | `https://api.cloudflare.com/client/v4` | 測試時改指向模擬伺服器 |
 | `ADMIN_USERNAME` | `admin` | 管理者帳號 |
@@ -136,7 +136,7 @@ docker compose start portal
 | `ADMIN_ALLOWED_CIDRS` | 同 `ALLOWED_CIDRS` | `/admin`、`/api`、`/login`、`/logout` 允許的來源 |
 | `TRUSTED_PROXIES` | `127.0.0.1` | 只信任這些 IP（或 CIDR）送來的 `X-Forwarded-For` / `X-Forwarded-Proto` |
 | `DB_PATH` | `/data/portal.db` | SQLite 位置；圖示、媒體、快照放在同目錄下的 `icons/`、`media/`、`snapshots/` |
-| `PORTAL_TITLE` | `SDC Services` | 初始網站名稱，之後在後台修改 |
+| `PORTAL_TITLE` | `Service Portal` | 初始網站名稱，之後在後台修改 |
 | `CHECK_INTERVAL` | `60` | 上架服務狀態檢查間隔（秒） |
 | `CHECK_TIMEOUT` | `8` | 每次 HTTP 檢查逾時（秒） |
 | `CHECK_VERIFY_TLS` | `true` | 檢查與抓圖示時是否驗證憑證 |

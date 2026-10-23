@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nycu-sdc/sdc-portal/internal/config"
+	"github.com/seanyeh77/cf-portal/internal/config"
 )
 
 func TestResolveClient(t *testing.T) {

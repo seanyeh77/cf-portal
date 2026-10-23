@@ -45,7 +45,7 @@ export function App() {
   }, []);
   const { data } = useRecords();
   const pending = data?.pending_requests ?? 0;
-  const title = init.title || 'SDC Services';
+  const title = init.title || 'Service Portal';
   useEffect(() => {
     const label = TABS.find(([k]) => k === tab)?.[1];
     document.title = `${label} · ${title} 管理後台`;

@@ -12,16 +12,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nycu-sdc/sdc-portal/internal/assets"
-	"github.com/nycu-sdc/sdc-portal/internal/auth"
-	"github.com/nycu-sdc/sdc-portal/internal/cloudflare"
-	"github.com/nycu-sdc/sdc-portal/internal/config"
-	"github.com/nycu-sdc/sdc-portal/internal/dnsrec"
-	"github.com/nycu-sdc/sdc-portal/internal/health"
-	"github.com/nycu-sdc/sdc-portal/internal/scanner"
-	"github.com/nycu-sdc/sdc-portal/internal/snapshots"
-	"github.com/nycu-sdc/sdc-portal/internal/store"
-	"github.com/nycu-sdc/sdc-portal/internal/webui"
+	"github.com/seanyeh77/cf-portal/internal/assets"
+	"github.com/seanyeh77/cf-portal/internal/auth"
+	"github.com/seanyeh77/cf-portal/internal/cloudflare"
+	"github.com/seanyeh77/cf-portal/internal/config"
+	"github.com/seanyeh77/cf-portal/internal/dnsrec"
+	"github.com/seanyeh77/cf-portal/internal/health"
+	"github.com/seanyeh77/cf-portal/internal/scanner"
+	"github.com/seanyeh77/cf-portal/internal/snapshots"
+	"github.com/seanyeh77/cf-portal/internal/store"
+	"github.com/seanyeh77/cf-portal/internal/webui"
 )
 
 // Server holds the dependencies of all handlers.

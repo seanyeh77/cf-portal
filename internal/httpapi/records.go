@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nycu-sdc/sdc-portal/internal/analysis"
-	"github.com/nycu-sdc/sdc-portal/internal/assets"
-	"github.com/nycu-sdc/sdc-portal/internal/dnsrec"
-	"github.com/nycu-sdc/sdc-portal/internal/loop"
-	"github.com/nycu-sdc/sdc-portal/internal/model"
-	"github.com/nycu-sdc/sdc-portal/internal/store"
+	"github.com/seanyeh77/cf-portal/internal/analysis"
+	"github.com/seanyeh77/cf-portal/internal/assets"
+	"github.com/seanyeh77/cf-portal/internal/dnsrec"
+	"github.com/seanyeh77/cf-portal/internal/loop"
+	"github.com/seanyeh77/cf-portal/internal/model"
+	"github.com/seanyeh77/cf-portal/internal/store"
 )
 
 type listingOut struct {

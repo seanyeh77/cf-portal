@@ -21,7 +21,7 @@ import (
 
 // Zone is the mocked zone name.
 const (
-	Zone   = "sdc.nycu.club"
+	Zone   = "example.org"
 	ZoneID = "023e105f4ecef8ad9ca31a8372d0c353"
 )
 
@@ -78,16 +78,16 @@ func Seed() []*Record {
 		mk("A", "grafana", "10.0.1.20", false),
 		mk("A", "gitlab", "10.0.1.21", false),
 		mk("A", "git", "10.0.1.21", false),
-		mk("CNAME", "docs", "sdc-docs.pages.dev", true),
+		mk("CNAME", "docs", "docs-site.pages.dev", true),
 		mk("A", "jupyter", "10.0.1.30", false),
 		mk("A", "wg", "140.113.235.10", false),
 		mk("TXT", "_dmarc", "v=DMARC1; p=none", false),
 		mk("CNAME", "alias", "localhost", false),
-		mk("CNAME", "chain", "alias.sdc.nycu.club", false),
+		mk("CNAME", "chain", "alias.example.org", false),
 		mk("A", "local", "127.0.0.1", false),
 		mk("A", "Old_Box", "10.0.2.5", false),
 		mk("MX", "@", "mail.example.com", false),
-		mk("SRV", "_minecraft._tcp", "0 25565 mc.sdc.nycu.club", false),
+		mk("SRV", "_minecraft._tcp", "0 25565 mc.example.org", false),
 	}
 	recs[0].TTL = 300
 	recs[11].Priority = new(10)

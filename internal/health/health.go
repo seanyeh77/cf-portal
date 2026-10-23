@@ -11,10 +11,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/nycu-sdc/sdc-portal/internal/httpclient"
-	"github.com/nycu-sdc/sdc-portal/internal/loop"
-	"github.com/nycu-sdc/sdc-portal/internal/model"
-	"github.com/nycu-sdc/sdc-portal/internal/store"
+	"github.com/seanyeh77/cf-portal/internal/httpclient"
+	"github.com/seanyeh77/cf-portal/internal/loop"
+	"github.com/seanyeh77/cf-portal/internal/model"
+	"github.com/seanyeh77/cf-portal/internal/store"
 )
 
 const (
@@ -51,7 +51,7 @@ func (c *Checker) Check(ctx context.Context, l model.Listing) store.Check {
 	res := store.Check{RecordID: l.RecordID, TS: float64(start.UnixNano()) / 1e9}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, l.EffectiveURL(), nil)
 	if err == nil {
-		req.Header.Set("User-Agent", "sdc-portal/1.0 (+status check)")
+		req.Header.Set("User-Agent", "cf-portal/1.0 (+status check)")
 		var resp *http.Response
 		resp, err = c.client.Do(req)
 		if err == nil {

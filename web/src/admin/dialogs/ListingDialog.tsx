@@ -6,7 +6,7 @@ import { distinctOf, sub } from '../lib/records';
 import { closeModal } from '../lib/store';
 import type { DNSRecord, Listing, RecordsData } from '../types';
 
-const PRESET_TAGS = ['需 VPN', '需帳號', '課程用', '測試中', '社員限定'];
+const PRESET_TAGS = ['需 VPN', '需帳號', '課程用', '測試中', '成員限定'];
 
 type IconMode = 'auto' | 'si' | 'upload' | 'none';
 

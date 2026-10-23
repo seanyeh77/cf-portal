@@ -144,7 +144,7 @@ func Load(getenv func(string) string) (*Config, error) {
 	r := &reader{get: getenv}
 	c := &Config{
 		CFAPIToken:        r.required("CF_API_TOKEN"),
-		CFZoneName:        strings.TrimSuffix(strings.ToLower(r.str("CF_ZONE_NAME", "sdc.nycu.club")), "."),
+		CFZoneName:        strings.TrimSuffix(strings.ToLower(r.required("CF_ZONE_NAME")), "."),
 		CFZoneID:          r.str("CF_ZONE_ID", ""),
 		CFAPIBase:         strings.TrimSuffix(r.str("CF_API_BASE", "https://api.cloudflare.com/client/v4"), "/"),
 		AdminUsername:     r.str("ADMIN_USERNAME", "admin"),
@@ -156,7 +156,7 @@ func Load(getenv func(string) string) (*Config, error) {
 		AdminAllowedCIDRs: r.cidrs("ADMIN_ALLOWED_CIDRS", r.str("ALLOWED_CIDRS", defaultCIDRs)),
 		TrustedProxies:    r.cidrs("TRUSTED_PROXIES", "127.0.0.1"),
 		DBPath:            r.str("DB_PATH", "/data/portal.db"),
-		PortalTitle:       r.str("PORTAL_TITLE", "SDC Services"),
+		PortalTitle:       r.str("PORTAL_TITLE", "Service Portal"),
 		CheckInterval:     r.seconds("CHECK_INTERVAL", 60),
 		CheckTimeout:      r.seconds("CHECK_TIMEOUT", 8),
 		CheckVerifyTLS:    r.boolean("CHECK_VERIFY_TLS", true),

@@ -20,6 +20,7 @@ trap cleanup EXIT
 trap 'exit 0' INT TERM
 HASH=$(printf '%s\n%s\n' "$PW" "$PW" | "$BIN/portal" hashpw 2>/dev/null)
 export CF_API_TOKEN=test-token \
+  CF_ZONE_NAME=example.org \
   CF_API_BASE=http://127.0.0.1:$MOCK_PORT/client/v4 \
   ADMIN_PASSWORD_HASH="$HASH" \
   SECRET_KEY=dev-secret-key-dev-secret-key-0123456789 \

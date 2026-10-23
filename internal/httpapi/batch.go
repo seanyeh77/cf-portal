@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/nycu-sdc/sdc-portal/internal/dnsrec"
-	"github.com/nycu-sdc/sdc-portal/internal/loop"
-	"github.com/nycu-sdc/sdc-portal/internal/model"
+	"github.com/seanyeh77/cf-portal/internal/dnsrec"
+	"github.com/seanyeh77/cf-portal/internal/loop"
+	"github.com/seanyeh77/cf-portal/internal/model"
 )
 
 // cfWorkers bounds concurrent Cloudflare writes in bulk operations, well

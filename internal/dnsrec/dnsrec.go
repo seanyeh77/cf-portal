@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/nycu-sdc/sdc-portal/internal/model"
+	"github.com/seanyeh77/cf-portal/internal/model"
 )
 
 // Editable lists the types this system can create and modify.

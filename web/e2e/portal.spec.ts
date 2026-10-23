@@ -5,7 +5,7 @@ import { BASE } from './seed.mjs';
 
 test.describe.configure({ mode: 'serial' });
 
-const card = (page: import('@playwright/test').Page, host: string) => page.getByTestId(`card-${host}.sdc.nycu.club`);
+const card = (page: import('@playwright/test').Page, host: string) => page.getByTestId(`card-${host}.example.org`);
 
 async function settings(body: Record<string, string>) {
   const r = await pwRequest.newContext({ storageState: 'e2e/.auth.json', baseURL: BASE });
@@ -39,7 +39,7 @@ test.describe('mouse', () => {
     await page.goto('/');
     const g = card(page, 'gitlab');
     await expect(g.locator('.sbar .cell')).toHaveCount(48);
-    await expect(g).toContainText('需帳號 · 社員限定');
+    await expect(g).toContainText('需帳號 · 成員限定');
     await expect(g).toContainText('正常');
     await expect(g).toHaveAttribute('target', '_blank');
     await expect(card(page, 'jupyter')).toContainText('無回應');

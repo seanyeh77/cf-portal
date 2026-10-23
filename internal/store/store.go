@@ -15,7 +15,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/nycu-sdc/sdc-portal/internal/model"
+	"github.com/seanyeh77/cf-portal/internal/model"
 )
 
 // ErrNotFound is returned when a row does not exist.
@@ -209,7 +209,7 @@ func DefaultSettings(title string) map[string]string {
 func (s *Store) Settings(ctx context.Context) (map[string]string, error) {
 	out := maps.Clone(s.Defaults)
 	if out == nil {
-		out = DefaultSettings("SDC Services")
+		out = DefaultSettings("Service Portal")
 	}
 	err := s.each(ctx, func(r *sql.Rows) error {
 		var k, v string

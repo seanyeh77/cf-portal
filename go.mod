@@ -1,4 +1,4 @@
-module github.com/nycu-sdc/sdc-portal
+module github.com/seanyeh77/cf-portal
 
 go 1.26.0
 

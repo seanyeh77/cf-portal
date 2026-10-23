@@ -7,29 +7,29 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nycu-sdc/sdc-portal/internal/model"
+	"github.com/seanyeh77/cf-portal/internal/model"
 )
 
 func TestBIND(t *testing.T) {
 	recs := []Record{
-		{RecordInput: model.RecordInput{Type: "A", Name: "grafana.sdc.nycu.club", Content: "10.0.1.20", TTL: 1}},
-		{RecordInput: model.RecordInput{Type: "TXT", Name: "_dmarc.sdc.nycu.club", Content: `v=DMARC1; p="none"`, TTL: 3600}},
-		{RecordInput: model.RecordInput{Type: "TXT", Name: "q.sdc.nycu.club", Content: `"already quoted"`, TTL: 1}},
-		{RecordInput: model.RecordInput{Type: "CNAME", Name: "docs.sdc.nycu.club", Content: "sdc-docs.pages.dev", TTL: 1, Proxied: true}},
-		{RecordInput: model.RecordInput{Type: "MX", Name: "sdc.nycu.club", Content: "mail.example.com", TTL: 1, Priority: new(10)}},
-		{RecordInput: model.RecordInput{Type: "NS", Name: "sub.sdc.nycu.club", Content: "ns1.example.com.", TTL: 86400}},
-		{RecordInput: model.RecordInput{Type: "SRV", Name: "_mc._tcp.sdc.nycu.club", Content: "0 25565 mc.sdc.nycu.club", TTL: 1, Priority: new(10)}},
+		{RecordInput: model.RecordInput{Type: "A", Name: "grafana.example.org", Content: "10.0.1.20", TTL: 1}},
+		{RecordInput: model.RecordInput{Type: "TXT", Name: "_dmarc.example.org", Content: `v=DMARC1; p="none"`, TTL: 3600}},
+		{RecordInput: model.RecordInput{Type: "TXT", Name: "q.example.org", Content: `"already quoted"`, TTL: 1}},
+		{RecordInput: model.RecordInput{Type: "CNAME", Name: "docs.example.org", Content: "docs-site.pages.dev", TTL: 1, Proxied: true}},
+		{RecordInput: model.RecordInput{Type: "MX", Name: "example.org", Content: "mail.example.com", TTL: 1, Priority: new(10)}},
+		{RecordInput: model.RecordInput{Type: "NS", Name: "sub.example.org", Content: "ns1.example.com.", TTL: 86400}},
+		{RecordInput: model.RecordInput{Type: "SRV", Name: "_mc._tcp.example.org", Content: "0 25565 mc.example.org", TTL: 1, Priority: new(10)}},
 	}
-	out := BIND("sdc.nycu.club", recs, time.Unix(0, 0))
+	out := BIND("example.org", recs, time.Unix(0, 0))
 	for _, want := range []string{
-		"$ORIGIN sdc.nycu.club.\n$TTL 300\n",
-		"grafana.sdc.nycu.club.\t300\tIN\tA\t10.0.1.20\n",
-		"_dmarc.sdc.nycu.club.\t3600\tIN\tTXT\t\"v=DMARC1; p=\\\"none\\\"\"\n",
-		"q.sdc.nycu.club.\t300\tIN\tTXT\t\"already quoted\"\n",
-		"docs.sdc.nycu.club.\t300\tIN\tCNAME\tsdc-docs.pages.dev. ; cf-proxied\n",
-		"sdc.nycu.club.\t300\tIN\tMX\t10 mail.example.com.\n",
-		"sub.sdc.nycu.club.\t86400\tIN\tNS\tns1.example.com.\n",
-		"_mc._tcp.sdc.nycu.club.\t300\tIN\tSRV\t10 0 25565 mc.sdc.nycu.club.\n",
+		"$ORIGIN example.org.\n$TTL 300\n",
+		"grafana.example.org.\t300\tIN\tA\t10.0.1.20\n",
+		"_dmarc.example.org.\t3600\tIN\tTXT\t\"v=DMARC1; p=\\\"none\\\"\"\n",
+		"q.example.org.\t300\tIN\tTXT\t\"already quoted\"\n",
+		"docs.example.org.\t300\tIN\tCNAME\tdocs-site.pages.dev. ; cf-proxied\n",
+		"example.org.\t300\tIN\tMX\t10 mail.example.com.\n",
+		"sub.example.org.\t86400\tIN\tNS\tns1.example.com.\n",
+		"_mc._tcp.example.org.\t300\tIN\tSRV\t10 0 25565 mc.example.org.\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in\n%s", want, out)

@@ -17,12 +17,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nycu-sdc/sdc-portal/internal/cloudflare"
-	"github.com/nycu-sdc/sdc-portal/internal/dnsrec"
-	"github.com/nycu-sdc/sdc-portal/internal/httpclient"
-	"github.com/nycu-sdc/sdc-portal/internal/loop"
-	"github.com/nycu-sdc/sdc-portal/internal/model"
-	"github.com/nycu-sdc/sdc-portal/internal/store"
+	"github.com/seanyeh77/cf-portal/internal/cloudflare"
+	"github.com/seanyeh77/cf-portal/internal/dnsrec"
+	"github.com/seanyeh77/cf-portal/internal/httpclient"
+	"github.com/seanyeh77/cf-portal/internal/loop"
+	"github.com/seanyeh77/cf-portal/internal/model"
+	"github.com/seanyeh77/cf-portal/internal/store"
 )
 
 const concurrency = 32
@@ -360,7 +360,7 @@ func (s *Scanner) fetch(ctx context.Context, u string) (int, string, error) {
 	if err != nil {
 		return 0, "", err
 	}
-	req.Header.Set("User-Agent", "sdc-portal/1.0 (+record scan)")
+	req.Header.Set("User-Agent", "cf-portal/1.0 (+record scan)")
 	resp, err := s.http.Do(req)
 	if err != nil {
 		return 0, "", err

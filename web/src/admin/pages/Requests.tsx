@@ -22,7 +22,7 @@ export function Requests() {
     <div className="requests">
       <div className="page-head">
         <h1>
-          網域申請 <Tip text="社員可於申請頁送出子網域申請，核准後自動建立 record，並帶入負責人、用途與到期日。申請人可於進度頁查看結果與管理者回覆。" />
+          網域申請 <Tip text="使用者可於申請頁送出子網域申請，核准後自動建立 record，並帶入負責人、用途與到期日。申請人可於進度頁查看結果與管理者回覆。" />
         </h1>
         <a href="/request" target="_blank" rel="noreferrer">
           開啟申請頁 ↗

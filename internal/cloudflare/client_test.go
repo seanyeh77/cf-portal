@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/nycu-sdc/sdc-portal/internal/model"
-	"github.com/nycu-sdc/sdc-portal/testdata/mockcf"
+	"github.com/seanyeh77/cf-portal/internal/model"
+	"github.com/seanyeh77/cf-portal/testdata/mockcf"
 )
 
 func TestClientAgainstMock(t *testing.T) {
@@ -27,19 +27,19 @@ func TestClientAgainstMock(t *testing.T) {
 	if id, _ := c.ZoneID(ctx); id != mockcf.ZoneID {
 		t.Fatal("zone id lookup")
 	}
-	rec, err := c.Create(ctx, model.RecordInput{Type: "A", Name: "new.sdc.nycu.club", Content: "10.9.9.9", TTL: 1})
+	rec, err := c.Create(ctx, model.RecordInput{Type: "A", Name: "new.example.org", Content: "10.9.9.9", TTL: 1})
 	if err != nil || rec.ID == "" {
 		t.Fatal(err)
 	}
-	_, err = c.Create(ctx, model.RecordInput{Type: "CNAME", Name: "new.sdc.nycu.club", Content: "x.example.com", TTL: 1})
+	_, err = c.Create(ctx, model.RecordInput{Type: "CNAME", Name: "new.example.org", Content: "x.example.com", TTL: 1})
 	var ce *Error
 	if !errors.As(err, &ce) || ce.HTTPStatus() != http.StatusBadRequest || ce.Message != "Cloudflare: 81053: An A, AAAA, or CNAME record with that host already exists." {
 		t.Fatalf("duplicate CNAME error: %v", err)
 	}
-	if _, err := c.Update(ctx, rec.ID, model.RecordInput{Type: "A", Name: "new.sdc.nycu.club", Content: "10.9.9.8", TTL: 1, Proxied: true}); err == nil {
+	if _, err := c.Update(ctx, rec.ID, model.RecordInput{Type: "A", Name: "new.example.org", Content: "10.9.9.8", TTL: 1, Proxied: true}); err == nil {
 		t.Fatal("private IP proxied must fail")
 	}
-	got, err := c.Update(ctx, rec.ID, model.RecordInput{Type: "A", Name: "new.sdc.nycu.club", Content: "10.9.9.8", TTL: 300})
+	got, err := c.Update(ctx, rec.ID, model.RecordInput{Type: "A", Name: "new.example.org", Content: "10.9.9.8", TTL: 300})
 	if err != nil || got.Content != "10.9.9.8" || got.TTL != 300 {
 		t.Fatalf("update: %+v %v", got, err)
 	}

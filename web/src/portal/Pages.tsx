@@ -253,7 +253,7 @@ export function ClosedPage({ init }: { init: PublicInit }) {
   return (
     <Shell site={init.site} narrow>
       <h1 className="page-h">目前未開放申請</h1>
-      <p className="lead">如需網域，請聯絡社團幹部。</p>
+      <p className="lead">如需網域，請聯絡管理者。</p>
       <a href="/">回到服務入口</a>
     </Shell>
   );

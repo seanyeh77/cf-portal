@@ -29,7 +29,7 @@ test('clicking a row opens the detail drawer', async ({ page }) => {
   await row(page, 'grafana').locator('td.c-target').click();
   const drawer = page.getByTestId('record-drawer');
   await expect(drawer).toBeVisible();
-  await expect(drawer).toContainText('grafana.sdc.nycu.club');
+  await expect(drawer).toContainText('grafana.example.org');
   await expect(drawer).toContainText('DNS 設定');
   await drawer.getByRole('button', { name: '關閉' }).click();
   await expect(drawer).toHaveCount(0);
@@ -55,7 +55,7 @@ test('row ⋯ menu offers details, listing and delete', async ({ page }) => {
 test('前往上游 opens the upstream record', async ({ page }) => {
   await openRecords(page);
   await row(page, 'chain').getByRole('button', { name: '前往上游' }).click();
-  await expect(page.getByTestId('record-drawer')).toContainText('alias.sdc.nycu.club');
+  await expect(page.getByTestId('record-drawer')).toContainText('alias.example.org');
   await expect(page.getByTestId('record-drawer')).toContainText('CNAME 目標無效');
 });
 
@@ -91,7 +91,7 @@ test('CSV import with preview skips duplicates', async ({ page }) => {
   await dlg.getByLabel('CSV 內容').fill(
     'name,type,content,proxied,ttl,comment,owner,purpose,notes,expires_at,auto_delete,no_scan\n' +
       'lab-a,A,10.0.8.1,false,1,,實驗室,"測試, 機器",,,false,false\n' +
-      'lab-b,CNAME,lab-a.sdc.nycu.club,false,1,,,,,,,\n' +
+      'lab-b,CNAME,lab-a.example.org,false,1,,,,,,,\n' +
       'vm01,A,10.0.9.1,false,1,,,,,,,\n',
   );
   await dlg.getByRole('button', { name: '預覽' }).click();
@@ -126,7 +126,7 @@ test('impact section lists owners of dependent CNAMEs', async ({ page }) => {
   await expect(impact).toContainText('chain');
   await expect(impact).toContainText('網管組');
   await impact.getByRole('button', { name: 'chain' }).click();
-  await expect(page.getByTestId('record-drawer')).toContainText('chain.sdc.nycu.club');
+  await expect(page.getByTestId('record-drawer')).toContainText('chain.example.org');
 });
 
 test('DNS change confirmation: focus on 取消, Enter does not save; then save and wait for the check', async ({ page }) => {
@@ -220,14 +220,14 @@ test('delete a record and restore it from the audit log', async ({ page }) => {
   await page.getByTestId('more-student019').click();
   await page.getByRole('menuitem', { name: '刪除' }).click();
   const dlg = page.getByTestId('delete-dialog');
-  await expect(dlg).toContainText('A student019.sdc.nycu.club → 10.0.3.119');
+  await expect(dlg).toContainText('A student019.example.org → 10.0.3.119');
   await dlg.getByRole('button', { name: '刪除' }).click();
   await expect(row(page, 'student019')).toHaveCount(0);
   await page.getByRole('link', { name: '操作紀錄' }).click();
   const first = page.locator('.audit-table tbody tr').first();
   await expect(first).toContainText('刪除 record');
   await first.getByRole('button', { name: '重新建立' }).click();
-  await expect(page.getByTestId('confirm-dialog')).toContainText('重新建立 A student019.sdc.nycu.club → 10.0.3.119');
+  await expect(page.getByTestId('confirm-dialog')).toContainText('重新建立 A student019.example.org → 10.0.3.119');
   await page.getByTestId('confirm-dialog').getByRole('button', { name: '重新建立' }).click();
   await expect(toast(page, '已還原')).toBeVisible();
   await page.getByRole('link', { name: 'DNS Records' }).click();
@@ -291,7 +291,7 @@ test('approve a public request', async ({ page, browser }) => {
 
 test('site settings save and image upload', async ({ page }) => {
   await page.goto('/admin#settings');
-  await page.getByLabel('網站名稱').fill('SDC 服務');
+  await page.getByLabel('網站名稱').fill('服務入口');
   await page.getByLabel('內容').fill('本週六 02:00 進行機房維護。');
   await page.getByLabel('樣式').selectOption('warn');
   await page.getByRole('button', { name: '儲存設定' }).click();
@@ -306,10 +306,10 @@ test('site settings save and image upload', async ({ page }) => {
   await page.getByTestId('upload-hero').setInputFiles({ name: 'x.png', mimeType: 'image/png', buffer: Buffer.from('<svg/>') });
   await expect(toast(page, '不接受 SVG 格式')).toBeVisible();
   await page.reload();
-  await expect(page.getByLabel('網站名稱')).toHaveValue('SDC 服務');
+  await expect(page.getByLabel('網站名稱')).toHaveValue('服務入口');
   await page.locator('.media-field', { hasText: 'Logo' }).getByRole('button', { name: '移除' }).click();
   await expect(page.locator('.media-preview.logo')).toContainText('無');
-  await page.getByLabel('網站名稱').fill('SDC Services');
+  await page.getByLabel('網站名稱').fill('Service Portal');
   await page.getByLabel('內容').fill('');
   await page.getByRole('button', { name: '儲存設定' }).click();
   await expect(toast(page, '已儲存')).toBeVisible();

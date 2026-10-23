@@ -1,7 +1,7 @@
 services:
   portal:
     build: .
-    image: sdc-portal:latest
+    image: cf-portal:latest
     env_file: .env
     ports:
       - "8080:8080"

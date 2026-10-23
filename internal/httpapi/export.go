@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nycu-sdc/sdc-portal/internal/model"
+	"github.com/seanyeh77/cf-portal/internal/model"
 )
 
 var exportHeader = []string{"name", "type", "content", "proxied", "ttl", "comment", "owner", "purpose", "notes", "expires_at",

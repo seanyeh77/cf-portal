@@ -22,7 +22,7 @@ var Assets fs.FS = func() fs.FS {
 
 const marker = "<!--INIT-->"
 
-const fallback = `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>SDC Services</title></head>
+const fallback = `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>Service Portal</title></head>
 <body><p>前端尚未建置，請執行 npm run build。</p>` + marker + `</body></html>`
 
 // Render returns an HTML entry (portal or admin) from fsys with data

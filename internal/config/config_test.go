@@ -8,12 +8,12 @@ import (
 func env(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
 
 func TestLoad(t *testing.T) {
-	base := map[string]string{"CF_API_TOKEN": "t", "ADMIN_PASSWORD_HASH": "argon2id:1:1:1:a:b", "SECRET_KEY": strings.Repeat("x", 32)}
+	base := map[string]string{"CF_API_TOKEN": "t", "CF_ZONE_NAME": "Example.org.", "ADMIN_PASSWORD_HASH": "argon2id:1:1:1:a:b", "SECRET_KEY": strings.Repeat("x", 32)}
 	c, err := Load(env(base))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.CFZoneName != "sdc.nycu.club" || c.SessionHours != 12 || !c.CookieSecure || len(c.AllowedCIDRs) != 5 || c.ScanTimeout.Seconds() != 2.5 {
+	if c.CFZoneName != "example.org" || c.SessionHours != 12 || !c.CookieSecure || len(c.AllowedCIDRs) != 5 || c.ScanTimeout.Seconds() != 2.5 {
 		t.Fatalf("defaults %+v", c)
 	}
 	for _, p := range c.AllowedCIDRs {
