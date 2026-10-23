@@ -4,9 +4,8 @@ import { confirmDialog, Dialog, DialogActions, Tip, toast } from '../../shared/u
 import { refreshRecords } from '../lib/data';
 import { ExpiryButtons } from '../lib/expiry';
 import {
-  dependents,
+  dnsRisks,
   fqdn,
-  isPublicIP,
   proxyWarning,
   nameRuleError,
   normTarget,
@@ -125,12 +124,7 @@ export function RecordEditor({ record, data, focus }: { record?: DNSRecord; data
         k === 'name' ? before.name !== form.name : k === 'content' ? normTarget(before.content) !== normTarget(form.content) : before[k] !== form[k],
       );
       if (changes.length > 0) {
-        const reasons: string[] = [];
-        if (before.proxied && !form.proxied && ['A', 'AAAA'].includes(form.type) && isPublicIP(form.content)) reasons.push('停用 Proxy 後，來源主機的 IP 會公開。');
-        if (changes.includes('type') || changes.includes('name')) reasons.push('變更類型或名稱等同刪除舊 record 再新增，舊名稱將立即失效。');
-        const deps = dependents(data.records, record.name).filter((d) => d.id !== record.id);
-        if (deps.length && (changes.includes('name') || changes.includes('content'))) reasons.push(`另有 ${deps.length} 筆 CNAME 指向此 record，會一併受影響。`);
-        if (record.listing) reasons.push('此 record 已上架到服務入口。');
+        const reasons = dnsRisks(record, form, data.records);
         const risky = reasons.length > 0;
         const ok = await confirmDialog({
           title: risky ? '確認高風險 DNS 變更' : '確認 DNS 變更',

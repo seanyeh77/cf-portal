@@ -73,6 +73,10 @@ export type ModalState =
   | { kind: 'delete'; id: string }
   | { kind: 'bulkMeta'; ids: string[]; focusOwner?: boolean }
   | { kind: 'bulkDelete'; ids: string[] }
+  | { kind: 'bulkDns'; ids: string[] }
+  | { kind: 'bulkList'; ids: string[] }
+  | { kind: 'bulkListEdit'; ids: string[] }
+  | { kind: 'bulkMute'; ids: string[] }
   | { kind: 'batch'; mode: 'rule' | 'csv' }
   | null;
 

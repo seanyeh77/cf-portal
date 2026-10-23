@@ -358,3 +358,17 @@ export function ConfirmHost() {
     </Dialog>
   );
 }
+
+/** A checkbox for a group: checked when all are selected, mixed when some are. */
+export function TriCheck({ total, selected, label, onChange }: { total: number; selected: number; label: string; onChange: (all: boolean) => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const all = total > 0 && selected === total;
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = selected > 0 && !all;
+  }, [selected, all]);
+  return (
+    <label className="check-hit" aria-label={label}>
+      <input ref={ref} type="checkbox" checked={all} disabled={!total} onChange={() => onChange(!all)} />
+    </label>
+  );
+}

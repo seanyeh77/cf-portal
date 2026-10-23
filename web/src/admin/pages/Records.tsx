@@ -1,8 +1,9 @@
-import { Fragment, memo, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { Fragment, memo, useEffect, useMemo, type ReactNode } from 'react';
 import { api, errMsg } from '../../shared/api';
 import { relTime } from '../../shared/format';
 import { expiryPresets, type ExpiryCycle } from '../lib/expiry';
-import { MenuButton, Tip, toast, type MenuItem } from '../../shared/ui';
+import { bulkExport, bulkScan, bulkUnlist } from '../dialogs/BulkDialogs';
+import { MenuButton, Tip, toast, TriCheck, type MenuItem } from '../../shared/ui';
 import { act, refreshRecords, useRecords } from '../lib/data';
 import {
   describeFilters,
@@ -164,27 +165,19 @@ function ConnDot({ r, pending }: { r: DNSRecord; pending: boolean }) {
 
 /** Selects or clears all of rows; shows a mixed state when only some are selected. */
 function SelectAll({ rows, selection, label }: { rows: DNSRecord[]; selection: Set<string>; label: string }) {
-  const ref = useRef<HTMLInputElement>(null);
-  const n = rows.filter((r) => selection.has(r.id)).length;
-  const all = rows.length > 0 && n === rows.length;
-  useEffect(() => {
-    if (ref.current) ref.current.indeterminate = n > 0 && !all;
-  }, [n, all]);
   return (
-    <label className="check-hit" aria-label={label}>
-      <input
-        ref={ref}
-        type="checkbox"
-        checked={all}
-        onChange={() =>
-          selectionStore.set((prev) => {
-            const next = new Set(prev);
-            rows.forEach((r) => (all ? next.delete(r.id) : next.add(r.id)));
-            return next;
-          })
-        }
-      />
-    </label>
+    <TriCheck
+      total={rows.length}
+      selected={rows.filter((r) => selection.has(r.id)).length}
+      label={label}
+      onChange={(all) =>
+        selectionStore.set((prev) => {
+          const next = new Set(prev);
+          rows.forEach((r) => (all ? next.add(r.id) : next.delete(r.id)));
+          return next;
+        })
+      }
+    />
   );
 }
 
@@ -342,6 +335,8 @@ function RecordsView({ data }: { data: RecordsData }) {
   const anyFilter = desc.length > 0;
   const allIds = useMemo(() => new Set(data.records.map((r) => r.id)), [data.records]);
   const selectedIds = Array.from(selection).filter((id) => allIds.has(id));
+  const listedSel = data.records.filter((r) => r.listing && selection.has(r.id)).length;
+  const unlistedSel = selectedIds.length - listedSel;
 
   // Clear selections of records that no longer exist.
   useEffect(() => {
@@ -550,32 +545,64 @@ function RecordsView({ data }: { data: RecordsData }) {
       {selectedIds.length > 0 && (
         <div className="bulkbar" role="region" aria-label="批次操作">
           <span>已選 {selectedIds.length} 筆</span>
-          <button type="button" className="linkbtn" onClick={() => modalStore.set({ kind: 'bulkMeta', ids: selectedIds })}>
-            設定管理資訊
+          <MenuButton
+            label="管理資訊 ▾"
+            className="linkbtn"
+            align="left"
+            testId="bulk-meta-menu"
+            items={[
+              { label: '設定管理資訊…', onClick: () => modalStore.set({ kind: 'bulkMeta', ids: selectedIds }) },
+              'sep',
+              ...expiryPresets(data.today, cycle).map((p) => ({
+                label: `到期日：${p.label}（${p.date}）`,
+                onClick: () => bulkSet(selectedIds, { expires_at: p.date }, `已將到期日設為 ${p.date}`),
+              })),
+              'sep',
+              { label: '停用連線檢查', onClick: () => bulkSet(selectedIds, { no_scan: true }, '已停用連線檢查') },
+              { label: '啟用連線檢查', onClick: () => bulkSet(selectedIds, { no_scan: false }, '已啟用連線檢查') },
+              'sep',
+              { label: '忽略問題…', onClick: () => modalStore.set({ kind: 'bulkMute', ids: selectedIds }) },
+            ]}
+          />
+          <button type="button" className="linkbtn" onClick={() => modalStore.set({ kind: 'bulkDns', ids: selectedIds })}>
+            修改 DNS
+          </button>
+          <MenuButton
+            label="入口 ▾"
+            className="linkbtn"
+            align="left"
+            testId="bulk-portal-menu"
+            items={[
+              {
+                label: `上架到入口…（${unlistedSel} 筆）`,
+                disabled: !unlistedSel,
+                tip: unlistedSel ? undefined : '選取的 record 皆已上架',
+                onClick: () => modalStore.set({ kind: 'bulkList', ids: selectedIds }),
+              },
+              {
+                label: `修改入口設定…（${listedSel} 筆）`,
+                disabled: !listedSel,
+                tip: listedSel ? undefined : '選取的 record 皆未上架',
+                onClick: () => modalStore.set({ kind: 'bulkListEdit', ids: selectedIds }),
+              },
+              {
+                label: `下架（${listedSel} 筆）`,
+                danger: true,
+                disabled: !listedSel,
+                tip: listedSel ? undefined : '選取的 record 皆未上架',
+                onClick: () => bulkUnlist(selectedIds, data),
+              },
+            ]}
+          />
+          <button type="button" className="linkbtn" onClick={() => bulkScan(selectedIds)}>
+            立即檢查
+          </button>
+          <button type="button" className="linkbtn" onClick={() => bulkExport(selectedIds)}>
+            匯出
           </button>
           <button type="button" className="linkbtn" onClick={() => modalStore.set({ kind: 'bulkDelete', ids: selectedIds })}>
             刪除
           </button>
-          <MenuButton
-            label="…"
-            className="linkbtn"
-            ariaLabel="更多批次操作"
-            align="left"
-            items={[
-              {
-                label: '停用連線檢查',
-                onClick: () => bulkSet(selectedIds, { no_scan: true }, '已停用連線檢查'),
-              },
-              {
-                label: '啟用連線檢查',
-                onClick: () => bulkSet(selectedIds, { no_scan: false }, '已啟用連線檢查'),
-              },
-              ...expiryPresets(data.today, cycle).map((p) => ({
-                label: `到期日設為${p.label}後（${p.date}）`,
-                onClick: () => bulkSet(selectedIds, { expires_at: p.date }, `已將到期日設為 ${p.date}`),
-              })),
-            ]}
-          />
           <span className="spacer" />
           <button type="button" className="linkbtn" onClick={() => selectionStore.set(new Set())}>
             取消選取

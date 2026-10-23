@@ -258,6 +258,24 @@ export function dependents(records: DNSRecord[], name: string) {
   return records.filter((r) => r.type === 'CNAME' && normTarget(r.content) === n);
 }
 
+/** Why changing record to after deserves a closer look; empty when it is routine. */
+export function dnsRisks(record: DNSRecord, after: { type: string; name: string; content: string; proxied: boolean }, records: DNSRecord[]) {
+  const reasons: string[] = [];
+  const nameChanged = normTarget(record.name) !== normTarget(after.name);
+  const contentChanged = normTarget(record.content) !== normTarget(after.content);
+  if (record.proxied && !after.proxied && ['A', 'AAAA'].includes(after.type) && isPublicIP(after.content)) reasons.push('停用 Proxy 後，來源主機的 IP 會公開。');
+  if (record.type !== after.type || nameChanged) reasons.push('變更類型或名稱等同刪除舊 record 再新增，舊名稱將立即失效。');
+  const deps = dependents(records, record.name).filter((d) => d.id !== record.id);
+  if (deps.length && (nameChanged || contentChanged)) reasons.push(`另有 ${deps.length} 筆 CNAME 指向此 record，會一併受影響。`);
+  if (record.listing) reasons.push('此 record 已上架到服務入口。');
+  return reasons;
+}
+
+/** The title a new portal listing starts with: a short purpose, else the subdomain. */
+export function defaultListingTitle(r: DNSRecord, zone: string) {
+  return (r.meta.purpose && [...r.meta.purpose].length <= 20 ? r.meta.purpose : sub(r.name, zone)) || r.name;
+}
+
 /** Labels of DNS record fields, keyed by API name. */
 export const DNS_FIELD_LABEL: Record<string, string> = {
   type: '類型',

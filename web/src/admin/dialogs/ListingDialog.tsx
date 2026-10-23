@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react';
 import { api, errMsg } from '../../shared/api';
 import { confirmDialog, Dialog, DialogActions, Tip, toast } from '../../shared/ui';
 import { act, refreshRecords } from '../lib/data';
-import { distinctOf, sub } from '../lib/records';
+import { defaultListingTitle, distinctOf } from '../lib/records';
 import { closeModal } from '../lib/store';
 import type { DNSRecord, Listing, RecordsData } from '../types';
 
@@ -17,7 +17,7 @@ type IconMode = 'auto' | 'si' | 'upload' | 'none';
 export function ListingDialog({ record, data }: { record: DNSRecord; data: RecordsData }) {
   const l = record.listing;
   const isNew = !l;
-  const defaultTitle = (record.meta.purpose && [...record.meta.purpose].length <= 20 ? record.meta.purpose : sub(record.name, data.zone)) || record.name;
+  const defaultTitle = defaultListingTitle(record, data.zone);
   const [title, setTitle] = useState(l?.title ?? defaultTitle);
   const [description, setDescription] = useState(l?.description ?? '');
   const [category, setCategory] = useState(l?.category ?? '');

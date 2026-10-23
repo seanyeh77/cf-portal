@@ -7,6 +7,7 @@ import { ownersOf, sub } from '../lib/records';
 import { closeModal, drawerStore, modalStore, selectionStore, useStore } from '../lib/store';
 import type { DNSRecord, RecordsData } from '../types';
 import { BatchDialog } from './BatchDialog';
+import { BulkDnsDialog, BulkListCreateDialog, BulkListEditDialog, BulkMuteDialog } from './BulkDialogs';
 import { ListingDialog } from './ListingDialog';
 import { RecordDrawer } from './RecordDrawer';
 import { RecordEditor } from './RecordEditor';
@@ -41,6 +42,18 @@ export function Modals() {
         break;
       case 'bulkDelete':
         dlg = <BulkDeleteDialog ids={modal.ids} data={data} />;
+        break;
+      case 'bulkDns':
+        dlg = <BulkDnsDialog ids={modal.ids} data={data} />;
+        break;
+      case 'bulkList':
+        dlg = <BulkListCreateDialog ids={modal.ids} data={data} />;
+        break;
+      case 'bulkListEdit':
+        dlg = <BulkListEditDialog ids={modal.ids} data={data} />;
+        break;
+      case 'bulkMute':
+        dlg = <BulkMuteDialog ids={modal.ids} data={data} />;
         break;
       case 'batch':
         dlg = <BatchDialog mode={modal.mode} data={data} />;
@@ -112,10 +125,7 @@ function BulkMetaDialog({ ids, focusOwner, data }: { ids: string[]; focusOwner?:
       return;
     }
     setBusy(true);
-    if (await act(() => api('POST', '/api/records/bulk-meta', { ids, set: body }), `已更新 ${ids.length} 筆`)) {
-      selectionStore.set(new Set());
-      closeModal();
-    }
+    if (await act(() => api('POST', '/api/records/bulk-meta', { ids, set: body }), `已更新 ${ids.length} 筆`)) closeModal();
     setBusy(false);
   };
   const row = (k: BulkField, label: string, input: React.ReactNode) => (

@@ -3,7 +3,7 @@
 管理 Cloudflare 上的一個 zone（例如 `example.org`）的服務入口與 DNS 後台，適用於任何社群、實驗室或團隊：
 
 - 服務入口 `/`：使用者查看目前有哪些服務、網址與是否正常。
-- 管理後台 `/admin`：讀寫 Cloudflare DNS record，記錄負責人、用途與到期日，找出有問題的 record，修改前顯示差異，所有變更可還原。
+- 管理後台 `/admin`：讀寫 Cloudflare DNS record，記錄負責人、用途與到期日，找出有問題的 record，修改前顯示差異，所有變更可還原。勾選多筆後可批次設定管理資訊、修改指向／Proxy／TTL、上架或下架入口、忽略問題、立即檢查、匯出與刪除；申請也可批次核准或駁回。
 - 網域申請 `/request`：使用者申請子網域，管理者審核後自動建立。
 
 單一 Go 執行檔（前端以 `embed` 內嵌）＋ SQLite，部署為一個 container 與一個 volume。
