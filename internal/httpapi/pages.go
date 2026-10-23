@@ -143,7 +143,7 @@ func (s *Server) portalData(r *http.Request) (map[string]any, error) {
 	catCount := map[string]int{}
 	for _, l := range ls {
 		services = append(services, publicService{ID: l.RecordID, Title: l.Title, Description: l.Description, Category: l.Category,
-			URL: l.EffectiveURL(), Hostname: l.Hostname, Tags: splitList(l.Tags), Icon: l.Icon, IconURL: iconURL(l),
+			URL: l.EffectiveURL(), Hostname: l.Hostname, Tags: l.Tags, Icon: l.Icon, IconURL: iconURL(l),
 			Featured: l.Featured, SortOrder: l.SortOrder, CreatedAt: l.CreatedAt})
 		c := l.Category
 		if c == "" {

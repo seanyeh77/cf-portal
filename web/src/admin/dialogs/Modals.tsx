@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../shared/api';
-import { Dialog, DialogActions, Tip, toast } from '../../shared/ui';
+import { Dialog, DialogActions, SuggestInput, toast } from '../../shared/ui';
 import { act, useRecords } from '../lib/data';
 import { FailedList, useBulk } from '../lib/bulk';
 import { ExpiryButtons } from '../lib/expiry';
@@ -8,7 +8,7 @@ import { ownersOf, pickRecords, sub } from '../lib/records';
 import { closeModal, drawerStore, modalStore, selectionStore, useStore } from '../lib/store';
 import type { DNSRecord, RecordsData } from '../types';
 import { BatchDialog } from './BatchDialog';
-import { BulkDnsDialog, BulkListCreateDialog, BulkListEditDialog, BulkMuteDialog } from './BulkDialogs';
+import { BulkDnsDialog, BulkListCreateDialog, BulkListEditDialog, BulkMuteDialog, OptRow } from './BulkDialogs';
 import { ListingDialog } from './ListingDialog';
 import { RecordDrawer } from './RecordDrawer';
 import { RecordEditor } from './RecordEditor';
@@ -108,36 +108,22 @@ function BulkMetaDialog({ ids, focusOwner, data }: { ids: string[]; focusOwner?:
   const [on, setOn] = useState<Record<BulkField, boolean>>({ owner: !!focusOwner, purpose: false, expires_at: false, auto_delete: false, no_scan: false });
   const [v, setV] = useState({ owner: '', purpose: '', expires_at: '', auto_delete: 'on', no_scan: 'on' });
   const ownerRef = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState(false);
+  const { busy, failed, run } = useBulk(closeModal);
   useEffect(() => {
     if (focusOwner) window.setTimeout(() => ownerRef.current?.focus(), 0);
   }, [focusOwner]);
-  const owners = ownersOf(data.records);
   const set = (k: BulkField, val: string) => setV((p) => ({ ...p, [k]: val }));
-  const save = async () => {
+  const tick = (k: BulkField) => ({ on: on[k], setOn: (val: boolean) => setOn((p) => ({ ...p, [k]: val })) });
+  const save = () => {
     const body: Record<string, unknown> = {};
     if (on.owner) body.owner = v.owner;
     if (on.purpose) body.purpose = v.purpose;
     if (on.expires_at) body.expires_at = v.expires_at;
     if (on.auto_delete) body.auto_delete = v.auto_delete === 'on';
     if (on.no_scan) body.no_scan = v.no_scan === 'off';
-    if (!Object.keys(body).length) {
-      toast('請勾選要修改的欄位', { error: true });
-      return;
-    }
-    setBusy(true);
-    if (await act(() => api('POST', '/api/records/bulk-meta', { ids, set: body }), `已更新 ${ids.length} 筆`)) closeModal();
-    setBusy(false);
+    if (!Object.keys(body).length) return toast('請勾選要修改的欄位', { error: true });
+    run('/api/records/bulk-meta', { ids, set: body }, (n) => `已更新 ${n} 筆`);
   };
-  const row = (k: BulkField, label: string, input: React.ReactNode) => (
-    <div className="bulk-row" key={k}>
-      <label className="check">
-        <input type="checkbox" checked={on[k]} onChange={(e) => setOn((p) => ({ ...p, [k]: e.target.checked }))} aria-label={'修改' + label} />
-        {label}
-      </label>
-      <div className="bulk-input">{input}</div>
-    </div>
-  );
   return (
     <Dialog
       title={`設定管理資訊（${ids.length} 筆）`}
@@ -146,54 +132,40 @@ function BulkMetaDialog({ ids, focusOwner, data }: { ids: string[]; focusOwner?:
       testId="bulk-meta"
       footer={<DialogActions onCancel={closeModal} confirm="儲存" disabled={busy} onConfirm={save} />}
     >
+      <FailedList items={failed} />
       <p className="small muted">僅修改勾選的欄位。</p>
-      {row(
-        'owner',
-        '負責人',
-        <>
-          <input
-            ref={ownerRef}
-            className="input"
-            list="bulk-owners"
-            disabled={!on.owner}
-            value={v.owner}
-            placeholder="姓名或職稱"
-            aria-label="負責人"
-            onChange={(e) => set('owner', e.target.value)}
-          />
-          <datalist id="bulk-owners">
-            {owners.map((o) => (
-              <option key={o} value={o} />
-            ))}
-          </datalist>
-        </>,
-      )}
-      {row('purpose', '用途', <input className="input" disabled={!on.purpose} value={v.purpose} aria-label="用途" onChange={(e) => set('purpose', e.target.value)} />)}
-      {row(
-        'expires_at',
-        '到期日',
+      <OptRow {...tick('owner')} label="負責人">
+        <SuggestInput
+          ref={ownerRef}
+          options={ownersOf(data.records)}
+          disabled={!on.owner}
+          value={v.owner}
+          placeholder="姓名或職稱"
+          aria-label="負責人"
+          onChange={(e) => set('owner', e.target.value)}
+        />
+      </OptRow>
+      <OptRow {...tick('purpose')} label="用途">
+        <input className="input" disabled={!on.purpose} value={v.purpose} aria-label="用途" onChange={(e) => set('purpose', e.target.value)} />
+      </OptRow>
+      <OptRow {...tick('expires_at')} label="到期日" tip="空白代表清除到期日。">
         <div className="row-gap">
           <input className="input date" type="date" disabled={!on.expires_at} value={v.expires_at} aria-label="到期日" onChange={(e) => set('expires_at', e.target.value)} />
           <ExpiryButtons data={data} disabled={!on.expires_at} onPick={(d) => set('expires_at', d)} />
-          <Tip text="空白代表清除到期日。" />
-        </div>,
-      )}
-      {row(
-        'auto_delete',
-        '自動刪除',
+        </div>
+      </OptRow>
+      <OptRow {...tick('auto_delete')} label="自動刪除">
         <select className="input" disabled={!on.auto_delete} value={v.auto_delete} aria-label="自動刪除" onChange={(e) => set('auto_delete', e.target.value)}>
           <option value="on">啟用</option>
           <option value="off">停用</option>
-        </select>,
-      )}
-      {row(
-        'no_scan',
-        '連線檢查',
+        </select>
+      </OptRow>
+      <OptRow {...tick('no_scan')} label="連線檢查">
         <select className="input" disabled={!on.no_scan} value={v.no_scan} aria-label="連線檢查" onChange={(e) => set('no_scan', e.target.value)}>
           <option value="on">啟用</option>
           <option value="off">停用</option>
-        </select>,
-      )}
+        </select>
+      </OptRow>
     </Dialog>
   );
 }

@@ -1,11 +1,11 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { api, errMsg } from '../../shared/api';
-import { confirmDialog, Dialog, DialogActions, Tip, toast, toggled } from '../../shared/ui';
+import { confirmDialog, Dialog, DialogActions, SuggestInput, Tip, toast, toggled } from '../../shared/ui';
 import { FailedList, runBulk, useBulk } from '../lib/bulk';
 import {
+  categoriesOf,
   cnameTargetCounts,
   defaultListingTitle,
-  distinctOf,
   DNS_FIELD_LABEL,
   dnsRisks,
   fieldValue,
@@ -21,7 +21,7 @@ import type { RecordInput, RecordsData } from '../types';
 // Bulk dialogs keep the selection, so the next action can follow.
 
 /** A labelled input that applies only when its checkbox is ticked. */
-function OptRow({ on, setOn, label, tip, children }: { on: boolean; setOn: (v: boolean) => void; label: string; tip?: string; children: ReactNode }) {
+export function OptRow({ on, setOn, label, tip, children }: { on: boolean; setOn: (v: boolean) => void; label: string; tip?: string; children: ReactNode }) {
   return (
     <div className="bulk-row">
       <label className="check">
@@ -223,7 +223,7 @@ export function BulkListCreateDialog({ ids, data }: { ids: string[]; data: Recor
   const [featured, setFeatured] = useState(false);
   const [icon, setIcon] = useState('auto');
   const { busy, failed, run } = useBulk(closeModal);
-  const categories = useMemo(() => distinctOf(data.records, (r) => r.listing?.category), [data.records]);
+  const categories = useMemo(() => categoriesOf(data.records), [data.records]);
   const setRow = (i: number, k: 'title' | 'url', v: string) => setRows((p) => p.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
 
   const save = () => {
@@ -244,12 +244,7 @@ export function BulkListCreateDialog({ ids, data }: { ids: string[]; data: Recor
       <div className="two">
         <div className="field">
           <label htmlFor="bl-cat">分類</label>
-          <input id="bl-cat" className="input" list="bl-cats" value={category} maxLength={20} onChange={(e) => setCategory(e.target.value)} />
-          <datalist id="bl-cats">
-            {categories.map((c) => (
-              <option key={c} value={c} />
-            ))}
-          </datalist>
+          <SuggestInput id="bl-cat" options={categories} value={category} maxLength={20} onChange={(e) => setCategory(e.target.value)} />
         </div>
         <div className="field">
           <label htmlFor="bl-icon">圖示</label>
@@ -264,7 +259,7 @@ export function BulkListCreateDialog({ ids, data }: { ids: string[]; data: Recor
           標籤 <Tip text="以逗號分隔，最多 6 個。" />
         </label>
         <input id="bl-tags" className="input" value={tags} onChange={(e) => setTags(e.target.value)} />
-        <TagButtons options={splitTags(data.settings.preset_tags)} value={tags} onChange={setTags} />
+        <TagButtons options={data.preset_tags} value={tags} onChange={setTags} />
       </div>
       <label className="check">
         <input type="checkbox" checked={featured} onChange={(e) => setFeatured(e.target.checked)} />
@@ -310,8 +305,8 @@ export function BulkListEditDialog({ ids, data }: { ids: string[]; data: Records
   const [remove, setRemove] = useState('');
   const [error, setError] = useState('');
   const { busy, failed, run } = useBulk(closeModal);
-  const categories = useMemo(() => distinctOf(data.records, (r) => r.listing?.category), [data.records]);
-  const used = splitTags(recs.map((r) => r.listing!.tags).join(',')).sort();
+  const categories = useMemo(() => categoriesOf(data.records), [data.records]);
+  const used = [...new Set(recs.flatMap((r) => r.listing!.tags))].sort();
 
   const save = () => {
     const body: Record<string, unknown> = { ids: recs.map((r) => r.id), add_tags: splitTags(add), remove_tags: splitTags(remove) };
@@ -333,12 +328,7 @@ export function BulkListEditDialog({ ids, data }: { ids: string[]; data: Records
       <FailedList items={failed} />
       <p className="small muted">僅修改勾選或填寫的欄位；標籤會加入或移除，不會覆蓋各服務原有的其他標籤。</p>
       <OptRow on={on.category} setOn={(v) => setOn((p) => ({ ...p, category: v }))} label="分類">
-        <input className="input" list="ble-cats" disabled={!on.category} value={category} maxLength={20} aria-label="分類" onChange={(e) => setCategory(e.target.value)} />
-        <datalist id="ble-cats">
-          {categories.map((c) => (
-            <option key={c} value={c} />
-          ))}
-        </datalist>
+        <SuggestInput options={categories} disabled={!on.category} value={category} maxLength={20} aria-label="分類" onChange={(e) => setCategory(e.target.value)} />
       </OptRow>
       <OptRow on={on.featured} setOn={(v) => setOn((p) => ({ ...p, featured: v }))} label="精選">
         <select className="input" disabled={!on.featured} value={featured} aria-label="精選" onChange={(e) => setFeatured(e.target.value)}>
@@ -349,7 +339,7 @@ export function BulkListEditDialog({ ids, data }: { ids: string[]; data: Records
       <div className="field">
         <label htmlFor="ble-add">加入標籤</label>
         <input id="ble-add" className="input" value={add} onChange={(e) => setAdd(e.target.value)} />
-        <TagButtons options={splitTags(data.settings.preset_tags)} value={add} onChange={setAdd} />
+        <TagButtons options={data.preset_tags} value={add} onChange={setAdd} />
       </div>
       <div className="field">
         <label htmlFor="ble-remove">移除標籤</label>

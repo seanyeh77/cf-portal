@@ -82,17 +82,25 @@ func (c *Checker) RunOnce(ctx context.Context) {
 		log.Printf("health: %v", err)
 		return
 	}
+	c.checkAll(ctx, ls)
+}
+
+// checkAll checks the listings concurrently and records the results in one go.
+func (c *Checker) checkAll(ctx context.Context, ls []model.Listing) {
 	results := make([]store.Check, len(ls))
 	loop.ForEach(len(ls), concurrency, func(i int) { results[i] = c.Check(ctx, ls[i]) })
 	c.record(ctx, results)
 }
 
-// CheckSoon checks one listing in the background.
-func (c *Checker) CheckSoon(l model.Listing) {
+// CheckSoon checks the listings in the background.
+func (c *Checker) CheckSoon(ls ...model.Listing) {
+	if len(ls) == 0 {
+		return
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
-		c.record(ctx, []store.Check{c.Check(ctx, l)})
+		c.checkAll(ctx, ls)
 	}()
 }
 

@@ -3,6 +3,7 @@ import { api, errMsg } from '../../shared/api';
 import { relTime } from '../../shared/format';
 import { expiryPresets, type ExpiryCycle } from '../lib/expiry';
 import { bulkExport, bulkScan, bulkUnlist } from '../dialogs/BulkDialogs';
+import { runBulk } from '../lib/bulk';
 import { MenuButton, Tip, toast, toggled, TriCheck, type MenuItem } from '../../shared/ui';
 import { act, refreshRecords, useRecords } from '../lib/data';
 import {
@@ -681,4 +682,4 @@ function RecordsView({ data }: { data: RecordsData }) {
   );
 }
 
-const bulkSet = (ids: string[], set: Record<string, unknown>, msg: string) => act(() => api('POST', '/api/records/bulk-meta', { ids, set }), msg);
+const bulkSet = (ids: string[], set: Record<string, unknown>, msg: string) => runBulk('/api/records/bulk-meta', { ids, set }, () => msg);

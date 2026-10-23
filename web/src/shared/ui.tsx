@@ -1,9 +1,12 @@
 import {
+  forwardRef,
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
+  type InputHTMLAttributes,
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
@@ -382,3 +385,21 @@ export function toggled<T>(s: Set<T>, keys: T | T[], on: boolean) {
   }
   return n;
 }
+
+/** A text input that suggests options from a datalist of its own. */
+export const SuggestInput = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement> & { options: string[] }>(function SuggestInput(
+  { options, ...props },
+  ref,
+) {
+  const id = useId();
+  return (
+    <>
+      <input ref={ref} className="input" list={id} {...props} />
+      <datalist id={id}>
+        {options.map((o) => (
+          <option key={o} value={o} />
+        ))}
+      </datalist>
+    </>
+  );
+});

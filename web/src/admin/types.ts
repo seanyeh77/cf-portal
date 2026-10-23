@@ -35,7 +35,7 @@ export type Listing = {
   url: string | null;
   sort_order: number;
   featured: boolean;
-  tags: string;
+  tags: string[];
   icon: string;
   icon_file: string | null;
   created_at: number;
@@ -102,8 +102,9 @@ export type RecordsData = {
     requests_enabled: string;
     expiry_cycle_name: string;
     expiry_cycle_dates: string;
-    preset_tags: string;
   };
+  /** Tags offered as one-click additions when listing a service. */
+  preset_tags: string[];
 };
 
 export type RecordInput = {

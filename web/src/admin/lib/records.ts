@@ -325,3 +325,6 @@ export function distinctOf(records: DNSRecord[], pick: (r: DNSRecord) => string 
 
 /** Distinct owners, for owner field suggestions. */
 export const ownersOf = (records: DNSRecord[]) => distinctOf(records, (r) => r.meta.owner);
+
+/** Distinct portal categories, for category field suggestions. */
+export const categoriesOf = (records: DNSRecord[]) => distinctOf(records, (r) => r.listing?.category);

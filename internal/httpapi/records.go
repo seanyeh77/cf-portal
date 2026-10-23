@@ -6,6 +6,7 @@ import (
 	"log"
 	"maps"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -189,7 +190,8 @@ func (s *Server) apiRecords(w http.ResponseWriter, r *http.Request) error {
 		"scan": s.Scanner.Status(), "pending_requests": pending, "last_snapshot": lastSnap, "tunnel_error": z.TunnelErr,
 		"settings": map[string]string{"zombie_days": set["zombie_days"], "expiry_warn_days": set["expiry_warn_days"], "scan_ports": set["scan_ports"],
 			"name_rule_hint": set["name_rule_hint"], "name_rule": set["name_rule"], "requests_enabled": set["requests_enabled"],
-			"expiry_cycle_name": set["expiry_cycle_name"], "expiry_cycle_dates": set["expiry_cycle_dates"], "preset_tags": set["preset_tags"]},
+			"expiry_cycle_name": set["expiry_cycle_name"], "expiry_cycle_dates": set["expiry_cycle_dates"]},
+		"preset_tags": splitList(set["preset_tags"]),
 	})
 	return nil
 }
@@ -258,16 +260,28 @@ func (s *Server) commitCreate(r *http.Request, in model.RecordInput, meta model.
 	return rec, nil
 }
 
-// createRecord prepares, conflict-checks, commits and queues a connection
-// check for one record, reporting whether a check was queued. newName
-// applies the naming rule; restores pass false to bring back old names.
-func (s *Server) createRecord(r *http.Request, in model.RecordInput, meta model.Meta, newName bool, action string, extra map[string]any) (*model.Record, bool, error) {
+// vetNew validates a new record and its meta, applies the naming rule when
+// newName is set and checks for conflicts in zone. Bulk callers pass a zone
+// copy that grows with each record they create.
+func (s *Server) vetNew(in model.RecordInput, meta model.Meta, newName bool, rule string, zone []model.Record) (model.RecordInput, model.Meta, error) {
 	in, meta, err := s.prepareCreate(in, meta)
 	if err == nil && newName {
-		err = s.checkNameRule(r.Context(), in.Name)
+		err = s.checkName(in.Name, rule)
 	}
 	if err == nil {
-		err = s.checkConflict(r.Context(), in, "")
+		err = dnsrec.Conflict(in, zone, "")
+	}
+	return in, meta, err
+}
+
+// createRecord vets, commits and queues a connection check for one record,
+// reporting whether a check was queued. newName applies the naming rule;
+// restores pass false to bring back old names.
+func (s *Server) createRecord(r *http.Request, in model.RecordInput, meta model.Meta, newName bool, action string, extra map[string]any) (*model.Record, bool, error) {
+	ctx := r.Context()
+	zone, _, err := s.CF.List(ctx, true)
+	if err == nil {
+		in, meta, err = s.vetNew(in, meta, newName, s.nameRule(ctx), zone)
 	}
 	if err != nil {
 		return nil, false, err
@@ -288,20 +302,25 @@ func (s *Server) updateRecord(r *http.Request, cur model.Record, in model.Record
 	if err := s.checkConflict(r.Context(), in, cur.ID); err != nil {
 		return nil, false, err
 	}
-	return s.writeUpdate(r, cur, in, metaBefore, metaAfter, action)
-}
-
-// writeUpdate is updateRecord after the conflict check, for callers that
-// checked against a zone they track themselves.
-func (s *Server) writeUpdate(r *http.Request, cur model.Record, in model.RecordInput, metaBefore, metaAfter model.Meta, action string) (*model.Record, bool, error) {
-	ctx, err := writeContext(r)
+	rec, err := s.writeUpdate(r, cur, in, metaBefore, metaAfter, action)
 	if err != nil {
 		return nil, false, err
+	}
+	return rec, s.checkAfterWrite(r.Context(), *rec), nil
+}
+
+// writeUpdate is updateRecord after the conflict check and before the
+// checks are queued, for callers that check a zone they track themselves
+// and queue the checks of many records at once.
+func (s *Server) writeUpdate(r *http.Request, cur model.Record, in model.RecordInput, metaBefore, metaAfter model.Meta, action string) (*model.Record, error) {
+	ctx, err := writeContext(r)
+	if err != nil {
+		return nil, err
 	}
 	metaChanged := metaAfter != metaBefore
 	if metaChanged {
 		if err := s.Store.PutMeta(ctx, cur.ID, metaAfter); err != nil {
-			return nil, false, err
+			return nil, err
 		}
 	}
 	rec, err := s.CF.Update(ctx, cur.ID, in)
@@ -309,7 +328,7 @@ func (s *Server) writeUpdate(r *http.Request, cur model.Record, in model.RecordI
 		if metaChanged {
 			s.rollbackMeta(ctx, r, cur, metaBefore, metaAfter)
 		}
-		return nil, false, err
+		return nil, err
 	}
 	d := map[string]any{"record_id": cur.ID, "before": cur.Input(), "after": rec.Input()}
 	if metaChanged {
@@ -319,10 +338,18 @@ func (s *Server) writeUpdate(r *http.Request, cur model.Record, in model.RecordI
 		s.Store.SetListingHostname(ctx, cur.ID, rec.Name)
 	}
 	s.auditLog(r, action, rec.Name, d)
-	if l, err := s.Store.Listing(ctx, cur.ID); err == nil {
-		s.Health.CheckSoon(*l)
+	return rec, nil
+}
+
+// checkAfterWrite queues the connection checks of changed records and the
+// status checks of their portal listings, reporting whether a connection
+// check was queued.
+func (s *Server) checkAfterWrite(ctx context.Context, recs ...model.Record) bool {
+	if ls, err := s.Store.Listings(ctx); err == nil {
+		changed := recordsByID(recs)
+		s.Health.CheckSoon(slices.DeleteFunc(ls, func(l model.Listing) bool { _, ok := changed[l.RecordID]; return !ok })...)
 	}
-	return rec, s.Scanner.ScanSoon(*rec), nil
+	return s.Scanner.ScanSoon(recs...)
 }
 
 // rollbackMeta restores metaBefore after Cloudflare rejected an update,
@@ -331,7 +358,7 @@ func (s *Server) writeUpdate(r *http.Request, cur model.Record, in model.RecordI
 func (s *Server) rollbackMeta(ctx context.Context, r *http.Request, cur model.Record, metaBefore, metaAfter model.Meta) {
 	if _, err := s.Store.RestoreMeta(ctx, cur.ID, metaAfter, metaBefore); err != nil {
 		log.Printf("roll back meta %s: %v", cur.Name, err)
-		s.auditMeta(r, cur, metaBefore, metaAfter, map[string]any{"note": "DNS 更新失敗，管理資訊未能還原"})
+		s.auditMeta(r, "meta_update", cur, metaBefore, metaAfter, map[string]any{"note": "DNS 更新失敗，管理資訊未能還原"})
 	}
 }
 
@@ -346,21 +373,22 @@ func writeContext(r *http.Request) (context.Context, error) {
 }
 
 // auditMeta writes a meta_update audit entry.
-func (s *Server) auditMeta(r *http.Request, rec model.Record, before, after model.Meta, extra map[string]any) {
+func (s *Server) auditMeta(r *http.Request, action string, rec model.Record, before, after model.Meta, extra map[string]any) {
 	d := map[string]any{"record_id": rec.ID, "meta_before": before, "meta_after": after}
 	maps.Copy(d, extra)
-	s.auditLog(r, "meta_update", rec.Name, d)
+	s.auditLog(r, action, rec.Name, d)
 }
 
-// putMeta replaces a record's meta and audits the change as meta_update.
-func (s *Server) putMeta(r *http.Request, rec model.Record, before, after model.Meta, extra map[string]any) error {
+// putMeta replaces a record's meta and audits the change as action
+// (meta_update, or bulk_meta for bulk changes).
+func (s *Server) putMeta(r *http.Request, action string, rec model.Record, before, after model.Meta, extra map[string]any) error {
 	if after == before {
 		return nil
 	}
 	if err := s.Store.PutMeta(r.Context(), rec.ID, after); err != nil {
 		return err
 	}
-	s.auditMeta(r, rec, before, after, extra)
+	s.auditMeta(r, action, rec, before, after, extra)
 	return nil
 }
 
@@ -395,11 +423,14 @@ type recordBody struct {
 	Meta model.Meta `json:"meta"`
 }
 
-// checkNameRule refuses a (validated) name that breaks the naming rule. It
-// applies to new names only; existing and restored names may keep breaking
-// it, and batch imports only warn.
-func (s *Server) checkNameRule(ctx context.Context, name string) error {
-	if msg := dnsrec.NameRuleError(name, s.Cfg.CFZoneName, s.settings(ctx)["name_rule"]); msg != "" {
+// nameRule is the current naming rule. It applies to new names only;
+// existing and restored names may keep breaking it, and batch imports only
+// warn.
+func (s *Server) nameRule(ctx context.Context) string { return s.settings(ctx)["name_rule"] }
+
+// checkName refuses a (validated) name that breaks rule.
+func (s *Server) checkName(name, rule string) error {
+	if msg := dnsrec.NameRuleError(name, s.Cfg.CFZoneName, rule); msg != "" {
 		return invalidf("名稱格式不符：" + msg)
 	}
 	return nil
@@ -450,7 +481,7 @@ func (s *Server) apiUpdateRecord(w http.ResponseWriter, r *http.Request) error {
 		// Normalization can turn a sent change back into the current value.
 		dnsChanged = len(model.ChangedFields(in, before)) > 0
 		if !strings.EqualFold(in.Name, before.Name) {
-			if err := s.checkNameRule(ctx, in.Name); err != nil {
+			if err := s.checkName(in.Name, s.nameRule(ctx)); err != nil {
 				return err
 			}
 		}
@@ -467,7 +498,7 @@ func (s *Server) apiUpdateRecord(w http.ResponseWriter, r *http.Request) error {
 	if dnsChanged {
 		rec, scanning, err = s.updateRecord(r, *cur, in, metaBefore, metaAfter, "record_update")
 	} else {
-		if err = s.putMeta(r, *cur, metaBefore, metaAfter, nil); err == nil && reenabled(metaBefore, metaAfter) {
+		if err = s.putMeta(r, "meta_update", *cur, metaBefore, metaAfter, nil); err == nil && reenabled(metaBefore, metaAfter) {
 			scanning = s.Scanner.ScanSoon(*cur)
 		}
 	}
@@ -567,7 +598,7 @@ func (s *Server) replaceMeta(w http.ResponseWriter, r *http.Request, id string, 
 	}
 	before, after, err := s.nextMeta(ctx, id, change)
 	if err == nil {
-		err = s.putMeta(r, *rec, before, after, extra)
+		err = s.putMeta(r, "meta_update", *rec, before, after, extra)
 	}
 	if err != nil {
 		return err
@@ -599,37 +630,23 @@ func (s *Server) apiBulkMeta(w http.ResponseWriter, r *http.Request) error {
 	if err := decode(w, r, &b); err != nil {
 		return err
 	}
-	if len(b.IDs) == 0 {
-		return httpErr{http.StatusUnprocessableEntity, "未選擇任何 record"}
+	if err := requireIDs(b.IDs); err != nil {
+		return err
 	}
 	ctx := r.Context()
-	all, err := s.Store.AllMeta(ctx)
+	recs, err := s.cachedRecords(ctx)
 	if err != nil {
 		return err
 	}
-	befores := map[string]model.Meta{}
-	afters := map[string]model.Meta{}
-	for _, id := range b.IDs {
-		after, err := cleanMeta(b.Set.Apply(all[id]))
+	// One audit entry per changed record, so each record's history shows
+	// it and it can be undone like a single meta change.
+	writeBulk(w, bulkEach(recs, b.IDs, func(_ int, rec model.Record) error {
+		before, after, err := s.nextMeta(ctx, rec.ID, b.Set.Apply)
 		if err != nil {
 			return err
 		}
-		befores[id], afters[id] = all[id], after
-	}
-	// One audit entry per changed record, so each record's history shows
-	// it and it can be undone like a single meta change.
-	changed := 0
-	for _, id := range b.IDs {
-		if afters[id] == befores[id] {
-			continue
-		}
-		if err := s.Store.PutMeta(ctx, id, afters[id]); err != nil {
-			return err
-		}
-		s.auditLog(r, "bulk_meta", s.recordName(ctx, id), map[string]any{"record_id": id, "meta_before": befores[id], "meta_after": afters[id]})
-		changed++
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"updated": changed})
+		return s.putMeta(r, "bulk_meta", rec, before, after, nil)
+	}), nil)
 	return nil
 }
 

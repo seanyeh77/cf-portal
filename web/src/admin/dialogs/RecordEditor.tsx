@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, errMsg } from '../../shared/api';
-import { confirmDialog, Dialog, DialogActions, Tip, toast } from '../../shared/ui';
+import { confirmDialog, Dialog, DialogActions, Tip, toast, SuggestInput } from '../../shared/ui';
 import { refreshRecords } from '../lib/data';
 import { ExpiryButtons } from '../lib/expiry';
 import {
@@ -272,20 +272,14 @@ export function RecordEditor({ record, data, focus }: { record?: DNSRecord; data
           </h3>
           <div className="field">
             <label htmlFor="ed-owner">負責人</label>
-            <input
+            <SuggestInput
               ref={refs.owner}
               id="ed-owner"
-              className="input"
-              list="owner-list"
+              options={owners}
               value={owner}
               placeholder="姓名或職稱"
               onChange={(e) => setOwner(e.target.value)}
             />
-            <datalist id="owner-list">
-              {owners.map((o) => (
-                <option key={o} value={o} />
-              ))}
-            </datalist>
           </div>
           <div className="field">
             <label htmlFor="ed-purpose">用途</label>

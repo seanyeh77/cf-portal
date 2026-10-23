@@ -96,19 +96,19 @@ type Tunnel struct {
 
 // Listing is a record published on the service portal.
 type Listing struct {
-	RecordID    string  `json:"record_id"`
-	Hostname    string  `json:"hostname"`
-	Title       string  `json:"title"`
-	Description string  `json:"description"`
-	Category    string  `json:"category"`
-	URL         *string `json:"url"`
-	SortOrder   int     `json:"sort_order"`
-	Featured    bool    `json:"featured"`
-	Tags        string  `json:"tags"`
-	Icon        string  `json:"icon"`
-	IconFile    *string `json:"icon_file"`
-	CreatedAt   float64 `json:"created_at"`
-	UpdatedAt   float64 `json:"updated_at"`
+	RecordID    string   `json:"record_id"`
+	Hostname    string   `json:"hostname"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Category    string   `json:"category"`
+	URL         *string  `json:"url"`
+	SortOrder   int      `json:"sort_order"`
+	Featured    bool     `json:"featured"`
+	Tags        []string `json:"tags"`
+	Icon        string   `json:"icon"`
+	IconFile    *string  `json:"icon_file"`
+	CreatedAt   float64  `json:"created_at"`
+	UpdatedAt   float64  `json:"updated_at"`
 }
 
 // EffectiveURL returns the URL the listing links to.

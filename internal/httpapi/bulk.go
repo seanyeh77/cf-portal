@@ -60,9 +60,9 @@ func recordsByID(recs []model.Record) map[string]model.Record {
 	return m
 }
 
-// bulkEach runs f for the record of every id, looked up in recs,
+// bulkEach runs f for the record of every id (the i-th), looked up in recs,
 // concurrently up to cfWorkers.
-func bulkEach(recs []model.Record, ids []string, f func(rec model.Record) error) []itemResult {
+func bulkEach(recs []model.Record, ids []string, f func(i int, rec model.Record) error) []itemResult {
 	byID := recordsByID(recs)
 	return collect(len(ids), cfWorkers, func(i int, res *itemResult) error {
 		rec, ok := byID[ids[i]]
@@ -71,7 +71,7 @@ func bulkEach(recs []model.Record, ids []string, f func(rec model.Record) error)
 			return errors.New("record 已不存在")
 		}
 		res.Name = rec.Name
-		return f(rec)
+		return f(i, rec)
 	})
 }
 
@@ -114,7 +114,7 @@ func (s *Server) apiBulkDelete(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	results := bulkEach(recs, b.IDs, func(rec model.Record) error { return s.deleteRecord(r, rec, "record_delete") })
+	results := bulkEach(recs, b.IDs, func(_ int, rec model.Record) error { return s.deleteRecord(r, rec, "record_delete") })
 	writeBulk(w, results, map[string]any{"snapshot": info.Name})
 	return nil
 }
@@ -246,26 +246,31 @@ func (s *Server) apiBulkDNS(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	plan := s.planDNS(recs, b.IDs, b.Set)
+	updated := make([]*model.Record, len(plan))
 	loop.ForEach(len(plan), cfWorkers, func(i int) {
 		c := &plan[i]
 		if c.After == nil {
 			return
 		}
 		// No meta change: before and after are both empty.
-		if _, _, err := s.writeUpdate(r, c.rec, *c.After, model.Meta{}, model.Meta{}, "record_update"); err != nil {
+		rec, err := s.writeUpdate(r, c.rec, *c.After, model.Meta{}, model.Meta{}, "record_update")
+		if err != nil {
 			c.Error = err.Error()
 		} else {
-			c.OK = true
+			c.OK, updated[i] = true, rec
 		}
 	})
+	var changed []model.Record
 	ok, failed := 0, 0
-	for _, c := range plan {
+	for i, c := range plan {
 		if c.OK {
 			ok++
+			changed = append(changed, *updated[i])
 		} else if c.Error != "" {
 			failed++
 		}
 	}
+	s.checkAfterWrite(r.Context(), changed...)
 	writeJSON(w, http.StatusOK, map[string]any{"results": plan, "ok": ok, "failed": failed, "snapshot": info.Name})
 	return nil
 }
@@ -299,10 +304,13 @@ func (s *Server) apiBulkScan(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	writeBulk(w, bulkEach(recs, ids, func(rec model.Record) error {
-		s.Scanner.ScanSoon(rec)
+	found := make([]model.Record, len(ids))
+	results := bulkEach(recs, ids, func(i int, rec model.Record) error {
+		found[i] = rec
 		return nil
-	}), nil)
+	})
+	s.Scanner.ScanSoon(slices.DeleteFunc(found, func(r model.Record) bool { return r.ID == "" })...)
+	writeBulk(w, results, nil)
 	return nil
 }
 
@@ -346,7 +354,7 @@ func (s *Server) apiBulkMute(w http.ResponseWriter, r *http.Request) error {
 		}
 		return slices.ContainsFunc(list, func(i analysis.Issue) bool { return i.Kind == kind })
 	}
-	results := bulkEach(z.Records, b.IDs, func(rec model.Record) error {
+	results := bulkEach(z.Records, b.IDs, func(_ int, rec model.Record) error {
 		changed := false
 		for _, set := range []struct {
 			kinds []string
@@ -376,7 +384,7 @@ func (s *Server) apiBulkMute(w http.ResponseWriter, r *http.Request) error {
 		if err != nil {
 			return err
 		}
-		return s.putMeta(r, rec, before, after, nil)
+		return s.putMeta(r, "meta_update", rec, before, after, nil)
 	})
 	writeBulk(w, results, nil)
 	return nil
@@ -400,10 +408,8 @@ func (s *Server) apiBulkListingCreate(w http.ResponseWriter, r *http.Request) er
 		return err
 	}
 	ids := make([]string, len(b.Items))
-	items := map[string]int{}
 	for i, it := range b.Items {
 		ids[i] = it.RecordID
-		items[it.RecordID] = i
 	}
 	if err := requireIDs(ids); err != nil {
 		return err
@@ -416,17 +422,32 @@ func (s *Server) apiBulkListingCreate(w http.ResponseWriter, r *http.Request) er
 	if err != nil {
 		return err
 	}
-	writeBulk(w, bulkEach(recs, ids, func(rec model.Record) error {
-		it := b.Items[items[rec.ID]]
+	saved := make([]model.Listing, len(ids))
+	results := bulkEach(recs, ids, func(i int, rec model.Record) error {
+		it := b.Items[i]
 		if prev, err := s.Store.Listing(ctx, rec.ID); err == nil && prev != nil {
 			return httpErr{http.StatusConflict, "已上架"}
 		} else if err != nil && err != store.ErrNotFound {
 			return err
 		}
-		_, err := s.saveListing(r, rec, nil, listingBody{Title: it.Title, URL: it.URL, Category: b.Category, Tags: b.Tags, Featured: b.Featured, Icon: b.Icon})
+		l, _, err := s.saveListing(r, rec, nil, listingBody{Title: it.Title, URL: it.URL, Category: b.Category, Tags: b.Tags, Featured: b.Featured, Icon: b.Icon})
+		saved[i] = l
 		return err
-	}), nil)
+	})
+	s.checkSaved(results, saved)
+	writeBulk(w, results, nil)
 	return nil
+}
+
+// checkSaved queues one status check for the listings saved without error.
+func (s *Server) checkSaved(results []itemResult, saved []model.Listing) {
+	var ls []model.Listing
+	for i, res := range results {
+		if res.OK {
+			ls = append(ls, saved[i])
+		}
+	}
+	s.Health.CheckSoon(ls...)
 }
 
 func (s *Server) apiBulkListingUpdate(w http.ResponseWriter, r *http.Request) error {
@@ -452,7 +473,8 @@ func (s *Server) apiBulkListingUpdate(w http.ResponseWriter, r *http.Request) er
 	if err != nil {
 		return err
 	}
-	writeBulk(w, bulkEach(recs, b.IDs, func(rec model.Record) error {
+	saved := make([]model.Listing, len(b.IDs))
+	results := bulkEach(recs, b.IDs, func(i int, rec model.Record) error {
 		prev, err := s.Store.Listing(ctx, rec.ID)
 		if err != nil {
 			return httpErr{http.StatusNotFound, "尚未上架"}
@@ -462,7 +484,7 @@ func (s *Server) apiBulkListingUpdate(w http.ResponseWriter, r *http.Request) er
 		if prev.URL != nil {
 			body.URL = *prev.URL
 		}
-		tags := slices.DeleteFunc(splitList(prev.Tags), func(t string) bool { return slices.Contains(remove, t) })
+		tags := slices.DeleteFunc(slices.Clone(prev.Tags), func(t string) bool { return slices.Contains(remove, t) })
 		body.Tags = append(tags, add...) // cleanListing drops duplicates
 		if b.Category != nil {
 			body.Category = *b.Category
@@ -470,9 +492,11 @@ func (s *Server) apiBulkListingUpdate(w http.ResponseWriter, r *http.Request) er
 		if b.Featured != nil {
 			body.Featured = *b.Featured
 		}
-		_, err = s.saveListing(r, rec, prev, body)
+		saved[i], _, err = s.saveListing(r, rec, prev, body)
 		return err
-	}), nil)
+	})
+	s.checkSaved(results, saved)
+	writeBulk(w, results, nil)
 	return nil
 }
 
@@ -527,28 +551,23 @@ func (s *Server) apiBulkApprove(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	rule := s.settings(ctx)["name_rule"]
+	rule := s.nameRule(ctx)
+	note := trimLen(b.Note, 500)
 	var created []model.Record
 	results := s.eachRequest(r, b.IDs, func(q *model.Request) error {
 		in := q.Input()
 		in.Proxied = b.Proxied && dnsrec.Proxiable[in.Type]
-		in, meta, err := s.prepareCreate(in, requestMeta(q))
+		in, meta, err := s.vetNew(in, requestMeta(q), true, rule, zone)
 		if err != nil {
 			return err
 		}
-		if msg := dnsrec.NameRuleError(in.Name, s.Cfg.CFZoneName, rule); msg != "" {
-			return invalidf("名稱格式不符：" + msg)
-		}
-		if err := dnsrec.Conflict(in, zone, ""); err != nil {
-			return err
-		}
-		rec, err := s.commitApproval(r, q, in, meta, b.Note)
+		rec, err := s.commitCreate(r, in, meta, "request_approve", approvalAudit(q, note))
 		if err != nil {
 			return err
 		}
 		zone = append(zone, *rec)
 		created = append(created, *rec)
-		return nil
+		return s.markApproved(ctx, q, rec, note)
 	})
 	s.Scanner.ScanSoon(created...)
 	writeBulk(w, results, nil)

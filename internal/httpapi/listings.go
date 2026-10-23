@@ -92,26 +92,28 @@ func (s *Server) apiPutListing(w http.ResponseWriter, r *http.Request) error {
 	if err != nil && err != store.ErrNotFound {
 		return err
 	}
-	iconErr, err := s.saveListing(r, *rec, prev, b)
+	l, iconErr, err := s.saveListing(r, *rec, prev, b)
 	if err != nil {
 		return err
 	}
+	s.Health.CheckSoon(l)
 	s.writeListing(w, r, id, map[string]any{"icon_error": iconErr})
 	return nil
 }
 
 // saveListing validates and stores the listing of rec, replacing prev
 // (nil for a new one), and audits it. It reports a failed Simple Icons
-// lookup separately: the listing is saved without the icon.
-func (s *Server) saveListing(r *http.Request, rec model.Record, prev *model.Listing, b listingBody) (string, error) {
+// lookup separately: the listing is saved without the icon. The caller
+// queues the status check.
+func (s *Server) saveListing(r *http.Request, rec model.Record, prev *model.Listing, b listingBody) (model.Listing, string, error) {
 	b, err := cleanListing(b)
 	if err != nil {
-		return "", err
+		return model.Listing{}, "", err
 	}
 	ctx := r.Context()
 	id := rec.ID
 	l := model.Listing{RecordID: id, Hostname: rec.Name, Title: b.Title, Description: b.Description, Category: b.Category,
-		SortOrder: b.SortOrder, Featured: b.Featured, Tags: strings.Join(b.Tags, ","), Icon: b.Icon}
+		SortOrder: b.SortOrder, Featured: b.Featured, Tags: b.Tags, Icon: b.Icon}
 	if b.URL != "" {
 		l.URL = &b.URL
 	}
@@ -127,7 +129,7 @@ func (s *Server) saveListing(r *http.Request, rec model.Record, prev *model.List
 		l.IconFile = nil
 	case b.Icon == "upload":
 		if prev == nil || prev.Icon != "upload" || prev.IconFile == nil {
-			return "", httpErr{http.StatusUnprocessableEntity, "請先上傳圖片"}
+			return l, "", httpErr{http.StatusUnprocessableEntity, "請先上傳圖片"}
 		}
 	case b.Icon == "auto":
 		urlChanged := prev == nil || prev.EffectiveURL() != l.EffectiveURL()
@@ -152,7 +154,7 @@ func (s *Server) saveListing(r *http.Request, rec model.Record, prev *model.List
 		}
 	}
 	if err := s.Store.PutListing(ctx, l); err != nil {
-		return "", err
+		return l, "", err
 	}
 	if oldFile != nil && (l.IconFile == nil || *l.IconFile != *oldFile) {
 		s.removeIconFile(ctx, oldFile)
@@ -161,8 +163,7 @@ func (s *Server) saveListing(r *http.Request, rec model.Record, prev *model.List
 	if fetchAuto {
 		go s.fetchAutoIcon(l)
 	}
-	s.Health.CheckSoon(l)
-	return iconErr, nil
+	return l, iconErr, nil
 }
 
 // writeListing answers with the listing as stored now, plus extra fields.

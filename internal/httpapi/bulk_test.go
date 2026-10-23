@@ -106,7 +106,7 @@ func TestBulkListings(t *testing.T) {
 		t.Fatalf("update %v", out)
 	}
 	l, _ := e.srv.Store.Listing(context.Background(), ids[1])
-	if l.Category != "監控" || !l.Featured || l.Tags != "內部使用" || l.Title != "GitLab" || l.URL == nil || *l.URL != "https://gitlab.example.org/explore" {
+	if l.Category != "監控" || !l.Featured || strings.Join(l.Tags, ",") != "內部使用" || l.Title != "GitLab" || l.URL == nil || *l.URL != "https://gitlab.example.org/explore" {
 		t.Fatalf("listing %+v", l)
 	}
 	if out := e.mustOK(e.do("POST", "/api/listings/bulk-delete", map[string]any{"ids": ids})); out["ok"] != 2.0 {

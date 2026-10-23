@@ -429,7 +429,13 @@ const listingCols = "record_id, hostname, title, description, category, url, sor
 func scanListing(sc rowScanner) (model.Listing, error) {
 	var l model.Listing
 	var url, icon sql.NullString
-	err := sc.Scan(&l.RecordID, &l.Hostname, &l.Title, &l.Description, &l.Category, &url, &l.SortOrder, &l.Featured, &l.Tags, &l.Icon, &icon, &l.CreatedAt, &l.UpdatedAt)
+	var tags string
+	err := sc.Scan(&l.RecordID, &l.Hostname, &l.Title, &l.Description, &l.Category, &url, &l.SortOrder, &l.Featured, &tags, &l.Icon, &icon, &l.CreatedAt, &l.UpdatedAt)
+	// Tags are stored comma-joined; they never contain commas themselves.
+	l.Tags = []string{}
+	if tags != "" {
+		l.Tags = strings.Split(tags, ",")
+	}
 	if url.Valid {
 		l.URL = &url.String
 	}
@@ -463,7 +469,7 @@ func (s *Store) PutListing(ctx context.Context, l model.Listing) error {
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(record_id) DO UPDATE SET hostname=excluded.hostname, title=excluded.title,
 		description=excluded.description, category=excluded.category, url=excluded.url, sort_order=excluded.sort_order,
 		featured=excluded.featured, tags=excluded.tags, icon=excluded.icon, icon_file=excluded.icon_file, updated_at=excluded.updated_at`,
-		l.RecordID, l.Hostname, l.Title, l.Description, l.Category, l.URL, l.SortOrder, l.Featured, l.Tags, l.Icon, l.IconFile, t, t)
+		l.RecordID, l.Hostname, l.Title, l.Description, l.Category, l.URL, l.SortOrder, l.Featured, strings.Join(l.Tags, ","), l.Icon, l.IconFile, t, t)
 	return err
 }
 

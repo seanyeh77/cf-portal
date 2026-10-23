@@ -1,8 +1,8 @@
 import { useMemo, useRef, useState } from 'react';
 import { api, errMsg } from '../../shared/api';
-import { confirmDialog, Dialog, DialogActions, Tip, toast } from '../../shared/ui';
+import { confirmDialog, Dialog, DialogActions, Tip, toast, SuggestInput } from '../../shared/ui';
 import { act, refreshRecords } from '../lib/data';
-import { defaultListingTitle, distinctOf, splitTags } from '../lib/records';
+import { categoriesOf, defaultListingTitle, splitTags } from '../lib/records';
 import { TagButtons } from './BulkDialogs';
 import { closeModal } from '../lib/store';
 import type { DNSRecord, Listing, RecordsData } from '../types';
@@ -18,7 +18,7 @@ export function ListingDialog({ record, data }: { record: DNSRecord; data: Recor
   const [category, setCategory] = useState(l?.category ?? '');
   const [sortOrder, setSortOrder] = useState(String(l?.sort_order ?? 0));
   const [url, setUrl] = useState(l?.url ?? '');
-  const [tags, setTags] = useState(l?.tags ? l.tags.split(',').join(', ') : '');
+  const [tags, setTags] = useState(l?.tags.join(', ') ?? '');
   const [featured, setFeatured] = useState(l?.featured ?? false);
   const initialMode: IconMode = !l ? 'auto' : l.icon.startsWith('si:') ? 'si' : (l.icon as IconMode);
   const [mode, setMode] = useState<IconMode>(initialMode);
@@ -28,11 +28,8 @@ export function ListingDialog({ record, data }: { record: DNSRecord; data: Recor
   const [error, setError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const categories = useMemo(() => distinctOf(data.records, (r) => r.listing?.category), [data.records]);
-  const usedTags = useMemo(
-    () => splitTags([data.settings.preset_tags, ...data.records.map((r) => r.listing?.tags ?? '')].join(',')),
-    [data.records, data.settings.preset_tags],
-  );
+  const categories = useMemo(() => categoriesOf(data.records), [data.records]);
+  const usedTags = useMemo(() => [...new Set([...data.preset_tags, ...data.records.flatMap((r) => r.listing?.tags ?? [])])], [data.records, data.preset_tags]);
   const tagList = splitTags(tags);
 
   const iconValue = mode === 'si' ? `si:${slug.trim().toLowerCase()}` : mode;
@@ -127,12 +124,7 @@ export function ListingDialog({ record, data }: { record: DNSRecord; data: Recor
         </div>
         <div className="field">
           <label htmlFor="ls-cat">分類</label>
-          <input id="ls-cat" className="input" list="ls-cats" value={category} placeholder="例：監控" maxLength={20} onChange={(e) => setCategory(e.target.value)} />
-          <datalist id="ls-cats">
-            {categories.map((c) => (
-              <option key={c} value={c} />
-            ))}
-          </datalist>
+          <SuggestInput id="ls-cat" options={categories} value={category} placeholder="例：監控" maxLength={20} onChange={(e) => setCategory(e.target.value)} />
         </div>
       </div>
       <div className="field">

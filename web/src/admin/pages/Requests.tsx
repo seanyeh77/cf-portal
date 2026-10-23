@@ -109,7 +109,7 @@ export function Requests() {
         </div>
       ))}
       {approve && <ApproveDialog req={approve} data={data} onClose={() => setApprove(null)} />}
-      {reject && <RejectDialog req={reject} onClose={() => setReject(null)} />}
+      {reject && <BulkRejectDialog reqs={[reject]} onClose={() => setReject(null)} />}
       {bulk === 'approve' && <BulkApproveDialog reqs={chosen} data={data} onClose={() => setBulk(null)} />}
       {bulk === 'reject' && <BulkRejectDialog reqs={chosen} onClose={() => setBulk(null)} />}
     </div>
@@ -200,39 +200,6 @@ function ApproveDialog({ req, data, onClose }: { req: RequestItem; data: Records
       <div className="field">
         <label htmlFor="ap-note">回覆申請人（選填）</label>
         <textarea id="ap-note" className="input" value={note} onChange={(e) => setNote(e.target.value)} />
-      </div>
-    </Dialog>
-  );
-}
-
-function RejectDialog({ req, onClose }: { req: RequestItem; onClose: () => void }) {
-  const [note, setNote] = useState('');
-  const [error, setError] = useState('');
-  const submit = async () => {
-    if (!note.trim()) {
-      setError('請填寫駁回原因');
-      return;
-    }
-    try {
-      await api('POST', `/api/requests/${req.id}/reject`, { note });
-      toast('已駁回');
-      onClose();
-      refreshRecords();
-    } catch (e) {
-      setError(errMsg(e));
-    }
-  };
-  return (
-    <Dialog
-      title={`駁回申請：${req.name}`}
-      onClose={onClose}
-      width={520}
-      testId="reject-dialog"
-      footer={<DialogActions error={error} onCancel={onClose} confirm="駁回" danger onConfirm={submit} />}
-    >
-      <div className="field">
-        <label htmlFor="rj-note">原因（申請人可見）</label>
-        <textarea id="rj-note" className="input" value={note} data-autofocus onChange={(e) => setNote(e.target.value)} />
       </div>
     </Dialog>
   );

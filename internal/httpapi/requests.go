@@ -254,35 +254,24 @@ func (s *Server) apiApprove(w http.ResponseWriter, r *http.Request) error {
 
 // approveRequest creates the request's record and marks it approved.
 func (s *Server) approveRequest(r *http.Request, q *model.Request, in model.RecordInput, meta model.Meta, note string) (*model.Record, error) {
-	in, meta, err := s.prepareCreate(in, meta)
-	if err == nil {
-		err = s.checkNameRule(r.Context(), in.Name)
-	}
-	if err == nil {
-		err = s.checkConflict(r.Context(), in, "")
-	}
+	note = trimLen(note, 500)
+	rec, _, err := s.createRecord(r, in, meta, true, "request_approve", approvalAudit(q, note))
 	if err != nil {
 		return nil, err
 	}
-	rec, err := s.commitApproval(r, q, in, meta, note)
-	if err == nil {
-		s.Scanner.ScanSoon(*rec)
-	}
-	return rec, err
+	return rec, s.markApproved(r.Context(), q, rec, note)
 }
 
-// commitApproval creates the checked record of a request and marks the
-// request approved. The caller queues the connection check.
-func (s *Server) commitApproval(r *http.Request, q *model.Request, in model.RecordInput, meta model.Meta, note string) (*model.Record, error) {
-	note = trimLen(note, 500)
-	rec, err := s.commitCreate(r, in, meta, "request_approve", map[string]any{"request_id": q.ID, "note": note})
-	if err != nil {
-		return nil, err
+func approvalAudit(q *model.Request, note string) map[string]any {
+	return map[string]any{"request_id": q.ID, "note": note}
+}
+
+// markApproved records that the request got rec.
+func (s *Server) markApproved(ctx context.Context, q *model.Request, rec *model.Record, note string) error {
+	if err := s.Store.DecideRequest(ctx, q.ID, "approved", note, &rec.ID); err != nil && !errors.Is(err, store.ErrNotFound) {
+		return err
 	}
-	if err := s.Store.DecideRequest(r.Context(), q.ID, "approved", note, &rec.ID); err != nil && !errors.Is(err, store.ErrNotFound) {
-		return nil, err
-	}
-	return rec, nil
+	return nil
 }
 
 func (s *Server) apiReject(w http.ResponseWriter, r *http.Request) error {
