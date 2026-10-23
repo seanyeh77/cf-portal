@@ -273,16 +273,3 @@ func (s *Server) markApproved(ctx context.Context, q *model.Request, rec *model.
 	}
 	return nil
 }
-
-// rejectRequest marks a request rejected; the reason is required.
-func (s *Server) rejectRequest(r *http.Request, q *model.Request, note string) error {
-	note = trimLen(note, 500)
-	if note == "" {
-		return httpErr{http.StatusUnprocessableEntity, "請填寫駁回原因"}
-	}
-	if err := s.Store.DecideRequest(r.Context(), q.ID, "rejected", note, nil); err != nil {
-		return err
-	}
-	s.auditLog(r, "request_reject", q.Name, map[string]any{"request_id": q.ID, "note": note})
-	return nil
-}

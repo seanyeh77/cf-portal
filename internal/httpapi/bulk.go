@@ -585,9 +585,16 @@ func (s *Server) apiBulkReject(w http.ResponseWriter, r *http.Request) error {
 	if err := requireIDs(b.IDs); err != nil {
 		return err
 	}
-	if strings.TrimSpace(b.Note) == "" {
+	note := trimLen(b.Note, 500)
+	if note == "" {
 		return httpErr{http.StatusUnprocessableEntity, "請填寫駁回原因"}
 	}
-	writeBulk(w, s.eachRequest(r, b.IDs, func(q *model.Request) error { return s.rejectRequest(r, q, b.Note) }), nil)
+	writeBulk(w, s.eachRequest(r, b.IDs, func(q *model.Request) error {
+		if err := s.Store.DecideRequest(r.Context(), q.ID, "rejected", note, nil); err != nil {
+			return err
+		}
+		s.auditLog(r, "request_reject", q.Name, map[string]any{"request_id": q.ID, "note": note})
+		return nil
+	}), nil)
 	return nil
 }

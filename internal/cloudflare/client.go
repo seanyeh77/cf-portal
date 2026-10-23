@@ -123,6 +123,48 @@ func (c *Client) do(ctx context.Context, method, path string, body any) (*envelo
 	return &env, nil
 }
 
+// call does one API call and decodes its result into T.
+func call[T any](ctx context.Context, c *Client, method, path string, body any) (T, *envelope, error) {
+	var out T
+	env, err := c.do(ctx, method, path, body)
+	if err != nil {
+		return out, nil, err
+	}
+	if len(env.Result) > 0 && string(env.Result) != "null" {
+		if err := json.Unmarshal(env.Result, &out); err != nil {
+			return out, env, &Error{Status: http.StatusBadGateway, Message: "Cloudflare: " + err.Error()}
+		}
+	}
+	return out, env, nil
+}
+
+// allPages fetches every page of a list, whose page n is at pathFor(n). The
+// first page tells how many there are; the rest are fetched together.
+func allPages[T any](ctx context.Context, c *Client, pathFor func(n int) string) ([]T, error) {
+	page := func(n int) ([]T, int, error) {
+		items, env, err := call[[]T](ctx, c, http.MethodGet, pathFor(n), nil)
+		if err != nil {
+			return nil, 0, err
+		}
+		total := 1
+		if env.ResultInfo != nil && len(items) > 0 {
+			total = env.ResultInfo.TotalPages
+		}
+		return items, total, nil
+	}
+	first, total, err := page(1)
+	if err != nil {
+		return nil, err
+	}
+	rest := make([][]T, max(total-1, 0))
+	errs := make([]error, len(rest))
+	loop.ForEach(len(rest), pageWorkers, func(i int) { rest[i], _, errs[i] = page(i + 2) })
+	if err := errors.Join(errs...); err != nil {
+		return nil, err
+	}
+	return slices.Concat(append([][]T{first}, rest...)...), nil
+}
+
 // ZoneID resolves and caches the zone id.
 func (c *Client) ZoneID(ctx context.Context) (string, error) {
 	c.mu.Lock()
@@ -165,20 +207,16 @@ func (c *Client) zone(ctx context.Context) (string, string, error) {
 	}
 	var z zoneObj
 	if id != "" {
-		env, err := c.do(ctx, http.MethodGet, "/zones/"+url.PathEscape(id), nil)
-		if err != nil {
+		var err error
+		if z, _, err = call[zoneObj](ctx, c, http.MethodGet, "/zones/"+url.PathEscape(id), nil); err != nil {
 			return "", "", err
-		}
-		if err := json.Unmarshal(env.Result, &z); err != nil {
-			return "", "", &Error{Status: http.StatusBadGateway, Message: "Cloudflare: " + err.Error()}
 		}
 	} else {
-		env, err := c.do(ctx, http.MethodGet, "/zones?name="+url.QueryEscape(c.zoneName), nil)
+		zones, _, err := call[[]zoneObj](ctx, c, http.MethodGet, "/zones?name="+url.QueryEscape(c.zoneName), nil)
 		if err != nil {
 			return "", "", err
 		}
-		var zones []zoneObj
-		if err := json.Unmarshal(env.Result, &zones); err != nil || len(zones) == 0 {
+		if len(zones) == 0 {
 			return "", "", &Error{Status: http.StatusBadGateway, Message: "Cloudflare: zone " + c.zoneName + " not found"}
 		}
 		z = zones[0]
@@ -200,14 +238,6 @@ const pageWorkers = 4
 // cacheTTL bounds how stale List may be when fresh is false.
 const cacheTTL = 15 * time.Second
 
-// Invalidate drops the cached record list.
-func (c *Client) Invalidate() {
-	c.mu.Lock()
-	c.cache = nil
-	c.gen++
-	c.mu.Unlock()
-}
-
 // List returns all records of the zone. With fresh=false a list younger
 // than cacheTTL may be reused.
 func (c *Client) List(ctx context.Context, fresh bool) ([]model.Record, time.Time, error) {
@@ -224,33 +254,12 @@ func (c *Client) List(ctx context.Context, fresh bool) ([]model.Record, time.Tim
 	if err != nil {
 		return nil, time.Time{}, err
 	}
-	page := func(n int) ([]model.Record, int, error) {
-		env, err := c.do(ctx, http.MethodGet, fmt.Sprintf("/zones/%s/dns_records?page=%d&per_page=100&order=name", zid, n), nil)
-		if err != nil {
-			return nil, 0, err
-		}
-		var recs []model.Record
-		if err := json.Unmarshal(env.Result, &recs); err != nil {
-			return nil, 0, &Error{Status: http.StatusBadGateway, Message: "Cloudflare: " + err.Error()}
-		}
-		total := 1
-		if env.ResultInfo != nil && len(recs) > 0 {
-			total = env.ResultInfo.TotalPages
-		}
-		return recs, total, nil
-	}
-	// The first page tells how many there are; the rest are fetched together.
-	first, total, err := page(1)
+	all, err := allPages[model.Record](ctx, c, func(n int) string {
+		return fmt.Sprintf("/zones/%s/dns_records?page=%d&per_page=100&order=name", zid, n)
+	})
 	if err != nil {
 		return nil, time.Time{}, err
 	}
-	rest := make([][]model.Record, max(total-1, 0))
-	errs := make([]error, len(rest))
-	loop.ForEach(len(rest), pageWorkers, func(i int) { rest[i], _, errs[i] = page(i + 2) })
-	if err := errors.Join(errs...); err != nil {
-		return nil, time.Time{}, err
-	}
-	all := slices.Concat(append([][]model.Record{first}, rest...)...)
 	now := time.Now()
 	c.mu.Lock()
 	if c.gen == gen {
@@ -266,20 +275,40 @@ func (c *Client) one(ctx context.Context, method, path string, body any) (*model
 	if err != nil {
 		return nil, err
 	}
-	env, err := c.do(ctx, method, "/zones/"+zid+"/dns_records"+path, body)
+	rec, _, err := call[model.Record](ctx, c, method, "/zones/"+zid+"/dns_records"+path, body)
 	if err != nil {
 		return nil, err
 	}
 	if method != http.MethodGet {
-		c.Invalidate()
-	}
-	var rec model.Record
-	if len(env.Result) > 0 && string(env.Result) != "null" {
-		if err := json.Unmarshal(env.Result, &rec); err != nil {
-			return nil, &Error{Status: http.StatusBadGateway, Message: "Cloudflare: " + err.Error()}
-		}
+		c.writeThrough(method == http.MethodDelete, rec)
 	}
 	return &rec, nil
+}
+
+// writeThrough applies a successful write to the cached list, so the list
+// read right after it needs no new fetch. A List already in flight started
+// before the write, so gen++ keeps it from storing its stale result.
+func (c *Client) writeThrough(deleted bool, rec model.Record) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.gen++
+	if c.cache == nil {
+		return
+	}
+	if rec.ID == "" {
+		c.cache = nil // cannot tell which record changed
+		return
+	}
+	switch i := slices.IndexFunc(c.cache, func(r model.Record) bool { return r.ID == rec.ID }); {
+	case deleted:
+		if i >= 0 {
+			c.cache = slices.Delete(c.cache, i, i+1)
+		}
+	case i >= 0:
+		c.cache[i] = rec
+	default:
+		c.cache = append(c.cache, rec)
+	}
 }
 
 // Get returns one record.
@@ -340,27 +369,20 @@ func (c *Client) listTunnels(ctx context.Context) (map[string]model.Tunnel, erro
 	if acc == "" {
 		return nil, &Error{Status: http.StatusBadGateway, Message: "Cloudflare: account id unknown"}
 	}
+	ts, err := allPages[struct {
+		ID        string  `json:"id"`
+		Name      string  `json:"name"`
+		Status    string  `json:"status"`
+		DeletedAt *string `json:"deleted_at"`
+	}](ctx, c, func(n int) string {
+		return fmt.Sprintf("/accounts/%s/cfd_tunnel?page=%d&per_page=100", url.PathEscape(acc), n)
+	})
+	if err != nil {
+		return nil, err
+	}
 	out := map[string]model.Tunnel{}
-	for page := 1; ; page++ {
-		env, err := c.do(ctx, http.MethodGet, fmt.Sprintf("/accounts/%s/cfd_tunnel?page=%d&per_page=100", url.PathEscape(acc), page), nil)
-		if err != nil {
-			return nil, err
-		}
-		var ts []struct {
-			ID        string  `json:"id"`
-			Name      string  `json:"name"`
-			Status    string  `json:"status"`
-			DeletedAt *string `json:"deleted_at"`
-		}
-		if err := json.Unmarshal(env.Result, &ts); err != nil {
-			return nil, &Error{Status: http.StatusBadGateway, Message: "Cloudflare: " + err.Error()}
-		}
-		for _, t := range ts {
-			out[strings.ToLower(t.ID)] = model.Tunnel{ID: t.ID, Name: t.Name, Status: t.Status, Deleted: t.DeletedAt != nil && *t.DeletedAt != ""}
-		}
-		if env.ResultInfo == nil || page >= env.ResultInfo.TotalPages || len(ts) == 0 {
-			break
-		}
+	for _, t := range ts {
+		out[strings.ToLower(t.ID)] = model.Tunnel{ID: t.ID, Name: t.Name, Status: t.Status, Deleted: t.DeletedAt != nil && *t.DeletedAt != ""}
 	}
 	return out, nil
 }

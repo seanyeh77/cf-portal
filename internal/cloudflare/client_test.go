@@ -90,3 +90,40 @@ func TestTunnels(t *testing.T) {
 		t.Fatal("CF_ACCOUNT_ID must take precedence")
 	}
 }
+
+func TestWriteThroughCache(t *testing.T) {
+	m := mockcf.New("tok")
+	srv := httptest.NewServer(m)
+	defer srv.Close()
+	ctx := context.Background()
+	c := New(srv.URL+"/client/v4", "tok", mockcf.Zone, "", "")
+	if _, _, err := c.List(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := c.Create(ctx, model.RecordInput{Type: "A", Name: "wt." + mockcf.Zone, Content: "10.1.1.1", TTL: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	upd, err := c.Update(ctx, m.Find("A", "grafana").ID, model.RecordInput{Type: "A", Name: "grafana." + mockcf.Zone, Content: "10.0.1.99", TTL: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Delete(ctx, m.Find("A", "gitlab").ID); err != nil {
+		t.Fatal(err)
+	}
+	m.Reset() // the cached list must not be re-read from the mock
+	recs, _, err := c.List(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]model.Record{}
+	for _, r := range recs {
+		byName[r.Name] = r
+	}
+	if _, ok := byName[rec.Name]; !ok || byName[upd.Name].Content != "10.0.1.99" || len(recs) != len(mockcf.Seed()) {
+		t.Fatalf("cache not written through: %d records", len(recs))
+	}
+	if _, ok := byName["gitlab."+mockcf.Zone]; ok {
+		t.Fatal("deleted record still cached")
+	}
+}
