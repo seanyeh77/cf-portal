@@ -81,7 +81,6 @@ export type RecordsData = {
   zone: string;
   today: string;
   synced_at: number;
-  now: number;
   records: DNSRecord[];
   orphans: { record_id: string; hostname: string; title: string }[];
   summary: Record<string, number>;
@@ -95,7 +94,6 @@ export type RecordsData = {
   tunnel_error: string;
   settings: {
     zombie_days: string;
-    expiry_warn_days: string;
     scan_ports: string;
     name_rule_hint: string;
     name_rule: string;

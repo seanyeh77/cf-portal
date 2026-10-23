@@ -274,24 +274,6 @@ func (s *Server) markApproved(ctx context.Context, q *model.Request, rec *model.
 	return nil
 }
 
-func (s *Server) apiReject(w http.ResponseWriter, r *http.Request) error {
-	q, err := s.loadRequest(r)
-	if err != nil {
-		return err
-	}
-	var b struct {
-		Note string `json:"note"`
-	}
-	if err := decode(w, r, &b); err != nil {
-		return err
-	}
-	if err := s.rejectRequest(r, q, b.Note); err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-	return nil
-}
-
 // rejectRequest marks a request rejected; the reason is required.
 func (s *Server) rejectRequest(r *http.Request, q *model.Request, note string) error {
 	note = trimLen(note, 500)

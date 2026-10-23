@@ -118,7 +118,6 @@ func (s *Server) routes() {
 	api("GET /api/snapshots/{name}/diff", s.apiSnapshotDiff)
 	api("GET /api/requests", s.apiRequests)
 	api("POST /api/requests/{id}/approve", s.apiApprove)
-	api("POST /api/requests/{id}/reject", s.apiReject)
 	api("POST /api/requests/bulk-approve", s.apiBulkApprove)
 	api("POST /api/requests/bulk-reject", s.apiBulkReject)
 	api("GET /api/audit", s.apiAudit)

@@ -20,6 +20,13 @@ import type { RecordInput, RecordsData } from '../types';
 
 // Bulk dialogs keep the selection, so the next action can follow.
 
+/** Which optional fields are ticked, and tick(k): the OptRow props for field k. */
+export function useOpts<K extends string>(init: Record<K, boolean>) {
+  const [on, setOn] = useState(init);
+  const tick = (k: K) => ({ on: on[k], setOn: (v: boolean) => setOn((p) => ({ ...p, [k]: v })) });
+  return [on, tick] as const;
+}
+
 /** A labelled input that applies only when its checkbox is ticked. */
 export function OptRow({ on, setOn, label, tip, children }: { on: boolean; setOn: (v: boolean) => void; label: string; tip?: string; children: ReactNode }) {
   return (
@@ -56,7 +63,7 @@ type DnsChange = { id: string; name: string; before: RecordInput; after?: Record
 
 export function BulkDnsDialog({ ids, data }: { ids: string[]; data: RecordsData }) {
   const recs = pickRecords(data, ids);
-  const [on, setOn] = useState({ content: false, proxied: false, ttl: false });
+  const [on, tick] = useOpts({ content: false, proxied: false, ttl: false });
   const [content, setContent] = useState('');
   const [proxied, setProxied] = useState('on');
   const [ttl, setTtl] = useState(1);
@@ -179,8 +186,7 @@ export function BulkDnsDialog({ ids, data }: { ids: string[]; data: RecordsData 
     >
       <p className="small muted">僅修改勾選的欄位。</p>
       <OptRow
-        on={on.content}
-        setOn={(v) => setOn((p) => ({ ...p, content: v }))}
+        {...tick('content')}
         label="指向目標"
         tip="IPv4 位址改為 A，IPv6 位址改為 AAAA，主機名稱改為 CNAME。只套用於 A、AAAA、CNAME。"
       >
@@ -193,13 +199,13 @@ export function BulkDnsDialog({ ids, data }: { ids: string[]; data: RecordsData 
           onChange={(e) => setContent(e.target.value)}
         />
       </OptRow>
-      <OptRow on={on.proxied} setOn={(v) => setOn((p) => ({ ...p, proxied: v }))} label="Proxy" tip="只套用於 A、AAAA、CNAME。啟用時 TTL 固定為自動。">
+      <OptRow {...tick('proxied')} label="Proxy" tip="只套用於 A、AAAA、CNAME。啟用時 TTL 固定為自動。">
         <select className="input" disabled={!on.proxied} value={proxied} aria-label="Proxy" onChange={(e) => setProxied(e.target.value)}>
           <option value="on">啟用</option>
           <option value="off">停用</option>
         </select>
       </OptRow>
-      <OptRow on={on.ttl} setOn={(v) => setOn((p) => ({ ...p, ttl: v }))} label="TTL">
+      <OptRow {...tick('ttl')} label="TTL">
         <select className="input" disabled={!on.ttl} value={ttl} aria-label="TTL" onChange={(e) => setTtl(Number(e.target.value))}>
           {TTL_OPTIONS.map(([v, l]) => (
             <option key={v} value={v}>
@@ -298,7 +304,7 @@ export function BulkListCreateDialog({ ids, data }: { ids: string[]; data: Recor
 
 export function BulkListEditDialog({ ids, data }: { ids: string[]; data: RecordsData }) {
   const recs = pickRecords(data, ids).filter((r) => r.listing);
-  const [on, setOn] = useState({ category: false, featured: false });
+  const [on, tick] = useOpts({ category: false, featured: false });
   const [category, setCategory] = useState('');
   const [featured, setFeatured] = useState('on');
   const [add, setAdd] = useState('');
@@ -327,10 +333,10 @@ export function BulkListEditDialog({ ids, data }: { ids: string[]; data: Records
     >
       <FailedList items={failed} />
       <p className="small muted">僅修改勾選或填寫的欄位；標籤會加入或移除，不會覆蓋各服務原有的其他標籤。</p>
-      <OptRow on={on.category} setOn={(v) => setOn((p) => ({ ...p, category: v }))} label="分類">
+      <OptRow {...tick('category')} label="分類">
         <SuggestInput options={categories} disabled={!on.category} value={category} maxLength={20} aria-label="分類" onChange={(e) => setCategory(e.target.value)} />
       </OptRow>
-      <OptRow on={on.featured} setOn={(v) => setOn((p) => ({ ...p, featured: v }))} label="精選">
+      <OptRow {...tick('featured')} label="精選">
         <select className="input" disabled={!on.featured} value={featured} aria-label="精選" onChange={(e) => setFeatured(e.target.value)}>
           <option value="on">設為精選</option>
           <option value="off">取消精選</option>

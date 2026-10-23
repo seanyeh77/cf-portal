@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/seanyeh77/cf-portal/internal/analysis"
@@ -71,11 +72,21 @@ func analysisSettings(set map[string]string) analysis.Settings {
 }
 
 func (s *Server) loadZone(ctx context.Context, fresh bool) (*zoneState, error) {
-	recs, at, err := s.CF.List(ctx, fresh)
-	if err != nil {
-		return nil, err
-	}
-	z := &zoneState{Records: recs, SyncedAt: at, Settings: s.settings(ctx), Listings: map[string]model.Listing{}}
+	// The Cloudflare calls run while the local tables are read. The tunnel
+	// list is fetched even for zones without tunnels: it is cached either way.
+	var (
+		wg      sync.WaitGroup
+		at      time.Time
+		listErr error
+		account map[string]model.Tunnel
+		tunErr  error
+	)
+	z := &zoneState{Listings: map[string]model.Listing{}}
+	wg.Go(func() { z.Records, at, listErr = s.CF.List(ctx, fresh) })
+	wg.Go(func() { account, tunErr = s.CF.Tunnels(ctx) })
+	defer wg.Wait()
+	var err error
+	z.Settings = s.settings(ctx)
 	if z.Meta, err = s.Store.AllMeta(ctx); err != nil {
 		return nil, err
 	}
@@ -92,7 +103,13 @@ func (s *Server) loadZone(ctx context.Context, fresh bool) (*zoneState, error) {
 	for _, l := range ls {
 		z.Listings[l.RecordID] = l
 	}
-	z.Tunnels, z.TunnelErr = s.recordTunnels(ctx, recs)
+	wg.Wait()
+	if listErr != nil {
+		return nil, listErr
+	}
+	recs := z.Records
+	z.SyncedAt = at
+	z.Tunnels, z.TunnelErr = recordTunnels(recs, account, tunErr)
 	z.Analysis = analysis.Analyze(analysis.Input{Zone: s.Cfg.CFZoneName, Records: recs, Meta: z.Meta, Scans: z.Scans, Mutes: z.Mutes,
 		Tunnels: z.Tunnels, Settings: analysisSettings(z.Settings), Now: s.Now(), Loc: s.Cfg.Timezone})
 	return z, nil
@@ -115,10 +132,11 @@ func (z *zoneState) out(r model.Record) recordOut {
 	return o
 }
 
-// recordTunnels resolves the tunnel of every tunnel record, by record id.
-// The account's tunnels are listed only when some record uses one; if they
-// cannot be listed, names and states stay empty and the reason is returned.
-func (s *Server) recordTunnels(ctx context.Context, recs []model.Record) (map[string]model.Tunnel, string) {
+// recordTunnels resolves the tunnel of every tunnel record, by record id,
+// from the account's tunnels. If they could not be listed (err), names and
+// states stay empty and the reason is returned, but only when some record
+// uses a tunnel.
+func recordTunnels(recs []model.Record, account map[string]model.Tunnel, err error) (map[string]model.Tunnel, string) {
 	out := map[string]model.Tunnel{}
 	for _, r := range recs {
 		if id := dnsrec.Tunnel(r); id != "" {
@@ -128,7 +146,6 @@ func (s *Server) recordTunnels(ctx context.Context, recs []model.Record) (map[st
 	if len(out) == 0 {
 		return out, ""
 	}
-	account, err := s.CF.Tunnels(ctx)
 	if err != nil {
 		return out, tunnelErrText(err)
 	}
@@ -184,11 +201,11 @@ func (s *Server) apiRecords(w http.ResponseWriter, r *http.Request) error {
 	}
 	set := z.Settings
 	writeJSON(w, http.StatusOK, map[string]any{
-		"zone": s.Cfg.CFZoneName, "today": s.today(), "synced_at": float64(z.SyncedAt.Unix()), "now": float64(s.Now().Unix()),
+		"zone": s.Cfg.CFZoneName, "today": s.today(), "synced_at": float64(z.SyncedAt.Unix()),
 		"records": out, "orphans": orphans, "summary": z.Analysis.Summary,
 		"kinds": analysis.Kinds, "groups": z.Analysis.Groups,
 		"scan": s.Scanner.Status(), "pending_requests": pending, "last_snapshot": lastSnap, "tunnel_error": z.TunnelErr,
-		"settings": map[string]string{"zombie_days": set["zombie_days"], "expiry_warn_days": set["expiry_warn_days"], "scan_ports": set["scan_ports"],
+		"settings": map[string]string{"zombie_days": set["zombie_days"], "scan_ports": set["scan_ports"],
 			"name_rule_hint": set["name_rule_hint"], "name_rule": set["name_rule"], "requests_enabled": set["requests_enabled"],
 			"expiry_cycle_name": set["expiry_cycle_name"], "expiry_cycle_dates": set["expiry_cycle_dates"]},
 		"preset_tags": splitList(set["preset_tags"]),

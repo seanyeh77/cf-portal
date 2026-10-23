@@ -8,7 +8,7 @@ import { ownersOf, pickRecords, sub } from '../lib/records';
 import { closeModal, drawerStore, modalStore, selectionStore, useStore } from '../lib/store';
 import type { DNSRecord, RecordsData } from '../types';
 import { BatchDialog } from './BatchDialog';
-import { BulkDnsDialog, BulkListCreateDialog, BulkListEditDialog, BulkMuteDialog, OptRow } from './BulkDialogs';
+import { BulkDnsDialog, BulkListCreateDialog, BulkListEditDialog, BulkMuteDialog, OptRow, useOpts } from './BulkDialogs';
 import { ListingDialog } from './ListingDialog';
 import { RecordDrawer } from './RecordDrawer';
 import { RecordEditor } from './RecordEditor';
@@ -105,7 +105,7 @@ function DeleteDialog({ r, zone }: { r: DNSRecord; zone: string }) {
 type BulkField = 'owner' | 'purpose' | 'expires_at' | 'auto_delete' | 'no_scan';
 
 function BulkMetaDialog({ ids, focusOwner, data }: { ids: string[]; focusOwner?: boolean; data: RecordsData }) {
-  const [on, setOn] = useState<Record<BulkField, boolean>>({ owner: !!focusOwner, purpose: false, expires_at: false, auto_delete: false, no_scan: false });
+  const [on, tick] = useOpts<BulkField>({ owner: !!focusOwner, purpose: false, expires_at: false, auto_delete: false, no_scan: false });
   const [v, setV] = useState({ owner: '', purpose: '', expires_at: '', auto_delete: 'on', no_scan: 'on' });
   const ownerRef = useRef<HTMLInputElement>(null);
   const { busy, failed, run } = useBulk(closeModal);
@@ -113,7 +113,6 @@ function BulkMetaDialog({ ids, focusOwner, data }: { ids: string[]; focusOwner?:
     if (focusOwner) window.setTimeout(() => ownerRef.current?.focus(), 0);
   }, [focusOwner]);
   const set = (k: BulkField, val: string) => setV((p) => ({ ...p, [k]: val }));
-  const tick = (k: BulkField) => ({ on: on[k], setOn: (val: boolean) => setOn((p) => ({ ...p, [k]: val })) });
   const save = () => {
     const body: Record<string, unknown> = {};
     if (on.owner) body.owner = v.owner;

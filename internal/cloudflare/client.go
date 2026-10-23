@@ -5,14 +5,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/seanyeh77/cf-portal/internal/loop"
 	"github.com/seanyeh77/cf-portal/internal/model"
 )
 
@@ -191,6 +194,9 @@ func (c *Client) zone(ctx context.Context) (string, string, error) {
 	return c.zoneID, c.account, nil
 }
 
+// pageWorkers bounds the record list pages fetched at once.
+const pageWorkers = 4
+
 // cacheTTL bounds how stale List may be when fresh is false.
 const cacheTTL = 15 * time.Second
 
@@ -218,21 +224,33 @@ func (c *Client) List(ctx context.Context, fresh bool) ([]model.Record, time.Tim
 	if err != nil {
 		return nil, time.Time{}, err
 	}
-	var all []model.Record
-	for page := 1; ; page++ {
-		env, err := c.do(ctx, http.MethodGet, fmt.Sprintf("/zones/%s/dns_records?page=%d&per_page=100&order=name", zid, page), nil)
+	page := func(n int) ([]model.Record, int, error) {
+		env, err := c.do(ctx, http.MethodGet, fmt.Sprintf("/zones/%s/dns_records?page=%d&per_page=100&order=name", zid, n), nil)
 		if err != nil {
-			return nil, time.Time{}, err
+			return nil, 0, err
 		}
 		var recs []model.Record
 		if err := json.Unmarshal(env.Result, &recs); err != nil {
-			return nil, time.Time{}, &Error{Status: http.StatusBadGateway, Message: "Cloudflare: " + err.Error()}
+			return nil, 0, &Error{Status: http.StatusBadGateway, Message: "Cloudflare: " + err.Error()}
 		}
-		all = append(all, recs...)
-		if env.ResultInfo == nil || page >= env.ResultInfo.TotalPages || len(recs) == 0 {
-			break
+		total := 1
+		if env.ResultInfo != nil && len(recs) > 0 {
+			total = env.ResultInfo.TotalPages
 		}
+		return recs, total, nil
 	}
+	// The first page tells how many there are; the rest are fetched together.
+	first, total, err := page(1)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	rest := make([][]model.Record, max(total-1, 0))
+	errs := make([]error, len(rest))
+	loop.ForEach(len(rest), pageWorkers, func(i int) { rest[i], _, errs[i] = page(i + 2) })
+	if err := errors.Join(errs...); err != nil {
+		return nil, time.Time{}, err
+	}
+	all := slices.Concat(append([][]model.Record{first}, rest...)...)
 	now := time.Now()
 	c.mu.Lock()
 	if c.gen == gen {
@@ -288,7 +306,9 @@ func (c *Client) Delete(ctx context.Context, id string) error {
 // tunnelTTL bounds how stale the tunnel list may be. A failed lookup is
 // cached as long, so a token without the Tunnel permission costs one
 // request per period.
-const tunnelTTL = time.Minute
+// It is not a multiple of the admin page's one-minute poll, so idle polls
+// do not all miss it.
+const tunnelTTL = 90 * time.Second
 
 type tunnelCache struct {
 	byID map[string]model.Tunnel

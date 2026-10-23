@@ -405,10 +405,12 @@ func TestRequestFlow(t *testing.T) {
 	}
 	// reject requires a note
 	other := list[1].(map[string]any)["id"].(float64)
-	if w := e.do("POST", fmt.Sprintf("/api/requests/%d/reject", int(other)), map[string]any{"note": " "}); w.Code != 422 {
+	if w := e.do("POST", "/api/requests/bulk-reject", map[string]any{"ids": []float64{other}, "note": " "}); w.Code != 422 {
 		t.Fatalf("reject without note: %d", w.Code)
 	}
-	e.mustOK(e.do("POST", fmt.Sprintf("/api/requests/%d/reject", int(other)), map[string]any{"note": "名稱重複"}))
+	if out := e.mustOK(e.do("POST", "/api/requests/bulk-reject", map[string]any{"ids": []float64{other}, "note": "名稱重複"})); out["ok"] != 1.0 {
+		t.Fatalf("reject %v", out)
+	}
 	// disabled
 	e.mustOK(e.do("PUT", "/api/settings", map[string]any{"requests_enabled": "0"}))
 	if w := e.do("GET", "/request", nil); w.Code != 404 {

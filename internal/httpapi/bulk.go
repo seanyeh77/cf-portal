@@ -75,6 +75,18 @@ func bulkEach(recs []model.Record, ids []string, f func(i int, rec model.Record)
 	})
 }
 
+// okItems returns the items whose result succeeded; items[i] belongs to
+// results[i].
+func okItems[T any](results []itemResult, items []T) []T {
+	var out []T
+	for i, r := range results {
+		if r.OK {
+			out = append(out, items[i])
+		}
+	}
+	return out
+}
+
 func writeBulk(w http.ResponseWriter, results []itemResult, extra map[string]any) {
 	ok := 0
 	for _, r := range results {
@@ -246,7 +258,6 @@ func (s *Server) apiBulkDNS(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	plan := s.planDNS(recs, b.IDs, b.Set)
-	updated := make([]*model.Record, len(plan))
 	loop.ForEach(len(plan), cfWorkers, func(i int) {
 		c := &plan[i]
 		if c.After == nil {
@@ -257,19 +268,19 @@ func (s *Server) apiBulkDNS(w http.ResponseWriter, r *http.Request) error {
 		if err != nil {
 			c.Error = err.Error()
 		} else {
-			c.OK, updated[i] = true, rec
+			c.OK, c.rec = true, *rec
 		}
 	})
 	var changed []model.Record
-	ok, failed := 0, 0
-	for i, c := range plan {
+	failed := 0
+	for _, c := range plan {
 		if c.OK {
-			ok++
-			changed = append(changed, *updated[i])
+			changed = append(changed, c.rec)
 		} else if c.Error != "" {
 			failed++
 		}
 	}
+	ok := len(changed)
 	s.checkAfterWrite(r.Context(), changed...)
 	writeJSON(w, http.StatusOK, map[string]any{"results": plan, "ok": ok, "failed": failed, "snapshot": info.Name})
 	return nil
@@ -309,7 +320,7 @@ func (s *Server) apiBulkScan(w http.ResponseWriter, r *http.Request) error {
 		found[i] = rec
 		return nil
 	})
-	s.Scanner.ScanSoon(slices.DeleteFunc(found, func(r model.Record) bool { return r.ID == "" })...)
+	s.Scanner.ScanSoon(okItems(results, found)...)
 	writeBulk(w, results, nil)
 	return nil
 }
@@ -434,20 +445,9 @@ func (s *Server) apiBulkListingCreate(w http.ResponseWriter, r *http.Request) er
 		saved[i] = l
 		return err
 	})
-	s.checkSaved(results, saved)
+	s.Health.CheckSoon(okItems(results, saved)...)
 	writeBulk(w, results, nil)
 	return nil
-}
-
-// checkSaved queues one status check for the listings saved without error.
-func (s *Server) checkSaved(results []itemResult, saved []model.Listing) {
-	var ls []model.Listing
-	for i, res := range results {
-		if res.OK {
-			ls = append(ls, saved[i])
-		}
-	}
-	s.Health.CheckSoon(ls...)
 }
 
 func (s *Server) apiBulkListingUpdate(w http.ResponseWriter, r *http.Request) error {
@@ -495,7 +495,7 @@ func (s *Server) apiBulkListingUpdate(w http.ResponseWriter, r *http.Request) er
 		saved[i], _, err = s.saveListing(r, rec, prev, body)
 		return err
 	})
-	s.checkSaved(results, saved)
+	s.Health.CheckSoon(okItems(results, saved)...)
 	writeBulk(w, results, nil)
 	return nil
 }
