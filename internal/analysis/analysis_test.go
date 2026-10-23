@@ -338,7 +338,7 @@ func TestNoOwnerNameRuleShared(t *testing.T) {
 		t.Error("CNAME targets compare case-insensitively")
 	}
 	fx.set.NameRule = `[a-z]+`
-	fx.recs = append(fx.recs, rec("6", "A", "hpc-x", "1.2.3.4"))
+	fx.recs = append(fx.recs, rec("6", "A", "team-x", "1.2.3.4"))
 	if r := fx.run(); !has(r, "6", "name_rule") || has(r, "2", "name_rule") {
 		t.Error("custom name rule")
 	}
@@ -369,7 +369,7 @@ func TestMutesAndLevel(t *testing.T) {
 
 func TestGroups(t *testing.T) {
 	var recs []model.Record
-	for _, n := range []string{"student001", "student002", "student003", "hpc-alice", "hpc-bob", "grafana", "_dmarc", "_acme-challenge"} {
+	for _, n := range []string{"host001", "host002", "host003", "team-alice", "team-bob", "grafana", "_dmarc", "_acme-challenge"} {
 		recs = append(recs, rec(n, "TXT", n, "x"))
 	}
 	r := newFixture(recs...).run()
@@ -377,10 +377,10 @@ func TestGroups(t *testing.T) {
 	for _, g := range r.Groups {
 		got[g[0].(string)] = g[1].(int)
 	}
-	if got["student"] != 3 || got["hpc"] != 2 || got["_系統"] != 2 || got["grafana"] != 0 {
+	if got["host"] != 3 || got["team"] != 2 || got["_系統"] != 2 || got["grafana"] != 0 {
 		t.Errorf("groups %v", got)
 	}
-	if r.Records["student002"].Group != "student" {
+	if r.Records["host002"].Group != "host" {
 		t.Error("record group")
 	}
 }

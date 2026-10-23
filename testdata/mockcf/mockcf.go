@@ -120,7 +120,7 @@ func Seed() []*Record {
 	recs[12].Priority = new(10)
 	recs[12].TTL = 3600
 	for i := 0; i < 20; i++ {
-		recs = append(recs, mk("A", fmt.Sprintf("student%03d", i), fmt.Sprintf("10.0.3.%d", 100+i), false))
+		recs = append(recs, mk("A", fmt.Sprintf("host%03d", i), fmt.Sprintf("10.0.3.%d", 100+i), false))
 	}
 	for _, r := range recs {
 		r.Proxiable = r.Type == "A" || r.Type == "AAAA" || r.Type == "CNAME"

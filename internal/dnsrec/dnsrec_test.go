@@ -131,7 +131,7 @@ func TestConflict(t *testing.T) {
 }
 
 func TestNameRule(t *testing.T) {
-	ok := []string{"grafana.example.org", "hpc-grafana.example.org", "_dmarc.example.org", "*.lab.example.org", "example.org", "_acme-challenge.Old.example.org"}
+	ok := []string{"grafana.example.org", "team-grafana.example.org", "_dmarc.example.org", "*.lab.example.org", "example.org", "_acme-challenge.Old.example.org"}
 	for _, n := range ok {
 		if e := NameRuleError(n, zone, ""); e != "" && !strings.Contains(n, "Old") {
 			t.Errorf("%s: unexpected %s", n, e)
@@ -143,13 +143,13 @@ func TestNameRule(t *testing.T) {
 			t.Errorf("%s should break the rule", n)
 		}
 	}
-	if NameRuleError("grafana.example.org", zone, `hpc-.*`) == "" {
+	if NameRuleError("grafana.example.org", zone, `team-.*`) == "" {
 		t.Error("custom rule should apply")
 	}
-	if NameRuleError("hpc-grafana.example.org", zone, `hpc-.*`) != "" {
+	if NameRuleError("team-grafana.example.org", zone, `team-.*`) != "" {
 		t.Error("custom rule should match")
 	}
-	if NameRuleError("_dmarc.example.org", zone, `hpc-.*`) != "" {
+	if NameRuleError("_dmarc.example.org", zone, `team-.*`) != "" {
 		t.Error("custom rule skips names with _ labels")
 	}
 	if NameRuleError("grafana.example.org", zone, `([`) != "" {
@@ -159,8 +159,8 @@ func TestNameRule(t *testing.T) {
 
 func TestGroup(t *testing.T) {
 	cases := map[string]string{
-		"student001.example.org": "student",
-		"hpc-alice.example.org":  "hpc",
+		"host001.example.org":    "host",
+		"team-alice.example.org": "team",
 		"_dmarc.example.org":     "_系統",
 		"grafana.example.org":    "grafana",
 		"a.b.example.org":        "a",

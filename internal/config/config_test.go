@@ -13,7 +13,7 @@ func TestLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.CFZoneName != "example.org" || c.SessionHours != 12 || !c.CookieSecure || len(c.AllowedCIDRs) != 5 || c.ScanTimeout.Seconds() != 2.5 {
+	if c.CFZoneName != "example.org" || c.SessionHours != 12 || !c.CookieSecure || len(c.AllowedCIDRs) != 5 || c.ScanTimeout.Seconds() != 2.5 || c.Timezone.String() != "UTC" {
 		t.Fatalf("defaults %+v", c)
 	}
 	for _, p := range c.AllowedCIDRs {

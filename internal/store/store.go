@@ -199,9 +199,11 @@ func DefaultSettings(title string) map[string]string {
 	return map[string]string{
 		"title": title, "subtitle": "", "accent": "#2dd4bf", "logo": "", "hero": "",
 		"announce_text": "", "announce_level": "info", "name_rule": "",
-		"name_rule_hint": "限小寫英文、數字與連字號，例：hpc-grafana",
+		"name_rule_hint": "限小寫英文、數字與連字號，例：team-grafana",
 		"zombie_days":    "7", "expiry_warn_days": "14", "scan_ports": "443,80,22",
 		"requests_enabled": "1", "request_note": "",
+		"expiry_cycle_name": "", "expiry_cycle_dates": "",
+		"preset_tags": "需 VPN, 需帳號, 內部使用, 測試中",
 	}
 }
 

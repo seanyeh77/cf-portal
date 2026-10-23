@@ -37,14 +37,14 @@ test('clicking a row opens the detail drawer', async ({ page }) => {
 
 test('row ⋯ menu offers details, listing and delete', async ({ page }) => {
   await openRecords(page);
-  await page.getByTestId('more-student000').click();
+  await page.getByTestId('more-host000').click();
   const menu = page.getByRole('menu');
   await expect(menu.getByRole('menuitem')).toHaveText(['詳細資料', '上架到入口', '刪除']);
   await expect(menu.getByRole('menuitem', { name: '刪除' })).toHaveClass(/danger/);
   await menu.getByRole('menuitem', { name: '上架到入口' }).click();
   const dlg = page.getByTestId('listing-dialog');
   await expect(dlg).toBeVisible();
-  await expect(dlg.getByLabel('顯示名稱')).toHaveValue('student000');
+  await expect(dlg.getByLabel('顯示名稱')).toHaveValue('host000');
   await dlg.getByRole('button', { name: '取消' }).click();
   await page.getByTestId('more-gitlab').click();
   await expect(page.getByRole('menuitem', { name: '入口設定' })).toBeVisible();
@@ -69,18 +69,18 @@ test('batch create by rule: preview then create 20 records', async ({ page }) =>
   await dlg.getByLabel('起始編號').fill('1');
   await dlg.getByLabel('結束編號').fill('20');
   await dlg.getByLabel('名稱補零').selectOption('2');
-  await dlg.getByLabel('負責人').fill('課程助教');
+  await dlg.getByLabel('負責人').fill('維運人員');
   await dlg.getByRole('button', { name: '預覽' }).click();
   await expect(dlg.getByRole('heading', { name: '可建立 20 筆' })).toBeVisible();
   await expect(dlg.locator('tbody tr').first()).toContainText('vm01');
   // Changing a field requires a new preview.
-  await dlg.getByLabel('用途').fill('作業系統課');
+  await dlg.getByLabel('用途').fill('系統實驗');
   await expect(dlg.getByRole('button', { name: /^建立/ })).toBeDisabled();
   await dlg.getByRole('button', { name: '預覽' }).click();
   await dlg.getByRole('button', { name: '建立 20 筆' }).click();
   await expect(toast(page, '已建立 20 筆')).toBeVisible();
   await expect(row(page, 'vm01')).toBeVisible();
-  await expect(row(page, 'vm20')).toContainText('作業系統課 · 課程助教');
+  await expect(row(page, 'vm20')).toContainText('系統實驗 · 維運人員');
 });
 
 test('CSV import with preview skips duplicates', async ({ page }) => {
@@ -159,7 +159,7 @@ test('impact section lists owners of dependent CNAMEs', async ({ page }) => {
 
 test('DNS change confirmation: focus on 取消, Enter does not save; then save and wait for the check', async ({ page }) => {
   await openRecords(page);
-  await row(page, 'student001').getByRole('button', { name: '編輯' }).click();
+  await row(page, 'host001').getByRole('button', { name: '編輯' }).click();
   const ed = page.getByTestId('record-editor');
   await ed.getByLabel('IPv4 位址').fill('10.0.3.201');
   await ed.getByRole('button', { name: '儲存' }).click();
@@ -174,11 +174,11 @@ test('DNS change confirmation: focus on 取消, Enter does not save; then save a
   await ed.getByRole('button', { name: '儲存' }).click();
   await page.getByTestId('confirm-dialog').getByRole('button', { name: '儲存' }).click();
   await expect(toast(page, '已儲存，連線檢查中')).toBeVisible();
-  await expect(row(page, 'student001')).toContainText('10.0.3.201');
-  await expect(row(page, 'student001').locator('.checking')).toBeVisible();
-  await expect(row(page, 'student001').locator('.dot.pending')).toBeVisible();
-  await expect(row(page, 'student001').locator('.checking')).toHaveCount(0, { timeout: 30_000 });
-  await expect(row(page, 'student001').locator('.dot.pending')).toHaveCount(0);
+  await expect(row(page, 'host001')).toContainText('10.0.3.201');
+  await expect(row(page, 'host001').locator('.checking')).toBeVisible();
+  await expect(row(page, 'host001').locator('.dot.pending')).toBeVisible();
+  await expect(row(page, 'host001').locator('.checking')).toHaveCount(0, { timeout: 30_000 });
+  await expect(row(page, 'host001').locator('.dot.pending')).toHaveCount(0);
 });
 
 test('high risk confirmation for a listed record and a rename', async ({ page }) => {
@@ -200,13 +200,13 @@ test('high risk confirmation for a listed record and a rename', async ({ page })
 
 test('meta-only edits save without confirmation; 延長 menu changes the expiry', async ({ page }) => {
   await openRecords(page);
-  await row(page, 'student003').getByRole('button', { name: '編輯' }).click();
+  await row(page, 'host003').getByRole('button', { name: '編輯' }).click();
   const ed = page.getByTestId('record-editor');
   await ed.getByLabel('到期日').fill(taipeiDate(3));
   await ed.getByRole('button', { name: '儲存' }).click();
   await expect(page.getByTestId('confirm-dialog')).toHaveCount(0);
   await expect(toast(page, /^已儲存$/)).toBeVisible();
-  const cell = row(page, 'student003').locator('.expiry-cell');
+  const cell = row(page, 'host003').locator('.expiry-cell');
   await expect(cell).toContainText('剩 3 日');
   await cell.getByRole('button', { name: '延長' }).click();
   await page.getByRole('menuitem', { name: /^延長一個月/ }).click();
@@ -225,12 +225,12 @@ test('expiry column hides when no listed record has a date', async ({ page }) =>
 
 test('filters are remembered across reloads', async ({ page }) => {
   await openRecords(page);
-  await page.getByLabel('分組').selectOption('student');
+  await page.getByLabel('分組').selectOption('host');
   await page.getByLabel('搜尋').fill('00');
-  await expect(page.locator('.filter-desc')).toContainText('搜尋「00」、student*');
+  await expect(page.locator('.filter-desc')).toContainText('搜尋「00」、host*');
   await page.reload();
-  await expect(page.getByLabel('分組')).toHaveValue('student');
-  await expect(page.locator('.filter-desc')).toContainText('搜尋「00」、student*');
+  await expect(page.getByLabel('分組')).toHaveValue('host');
+  await expect(page.locator('.filter-desc')).toContainText('搜尋「00」、host*');
   await page.getByRole('button', { name: '清除全部' }).click();
 });
 
@@ -245,21 +245,21 @@ test('group by target', async ({ page }) => {
 
 test('delete a record and restore it from the audit log', async ({ page }) => {
   await openRecords(page);
-  await page.getByTestId('more-student019').click();
+  await page.getByTestId('more-host019').click();
   await page.getByRole('menuitem', { name: '刪除' }).click();
   const dlg = page.getByTestId('delete-dialog');
-  await expect(dlg).toContainText('A student019.example.org → 10.0.3.119');
+  await expect(dlg).toContainText('A host019.example.org → 10.0.3.119');
   await dlg.getByRole('button', { name: '刪除' }).click();
-  await expect(row(page, 'student019')).toHaveCount(0);
+  await expect(row(page, 'host019')).toHaveCount(0);
   await page.getByRole('link', { name: '操作紀錄' }).click();
   const first = page.locator('.audit-table tbody tr').first();
   await expect(first).toContainText('刪除 record');
   await first.getByRole('button', { name: '重新建立' }).click();
-  await expect(page.getByTestId('confirm-dialog')).toContainText('重新建立 A student019.example.org → 10.0.3.119');
+  await expect(page.getByTestId('confirm-dialog')).toContainText('重新建立 A host019.example.org → 10.0.3.119');
   await page.getByTestId('confirm-dialog').getByRole('button', { name: '重新建立' }).click();
   await expect(toast(page, '已還原')).toBeVisible();
   await page.getByRole('link', { name: 'DNS Records' }).click();
-  await expect(row(page, 'student019')).toContainText('網管組');
+  await expect(row(page, 'host019')).toContainText('網管組');
 });
 
 test('bulk delete with snapshot, then restore from the snapshot comparison', async ({ page }) => {

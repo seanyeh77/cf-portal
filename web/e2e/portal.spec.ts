@@ -200,7 +200,7 @@ test.describe('keyboard', () => {
     await page.keyboard.press('Enter');
     await page.keyboard.press('g');
     await page.keyboard.press('t');
-    await expect(page.locator('.cats button.active')).toContainText('教學');
+    await expect(page.locator('.cats button.active')).toContainText('分析');
     await page.keyboard.press('Escape');
     await page.keyboard.press('Escape');
     await expect(page.locator('.cats button.active')).toContainText('全部');

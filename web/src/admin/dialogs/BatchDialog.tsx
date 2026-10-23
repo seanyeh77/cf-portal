@@ -1,9 +1,9 @@
 import { useMemo, useRef, useState } from 'react';
 import { api, errMsg } from '../../shared/api';
-import { semesterEnd } from '../../shared/format';
 import { Dialog, Tip, toast } from '../../shared/ui';
 import { CSV_TEMPLATE, csvObjects, truthy } from '../lib/csv';
 import { refreshRecords } from '../lib/data';
+import { ExpiryButtons } from '../lib/expiry';
 import { REQUEST_TYPES, sub } from '../lib/records';
 import { closeModal } from '../lib/store';
 import type { Meta, RecordInput, RecordsData } from '../types';
@@ -16,7 +16,7 @@ const pad = (n: number, w: number) => String(n).padStart(w, '0');
 
 export function BatchDialog({ mode: initialMode, data }: { mode: 'rule' | 'csv'; data: RecordsData }) {
   const [mode, setMode] = useState(initialMode);
-  const [nameTpl, setNameTpl] = useState('student{n}');
+  const [nameTpl, setNameTpl] = useState('host{n}');
   const [type, setType] = useState('A');
   const [contentTpl, setContentTpl] = useState('10.0.3.{n}');
   const [from, setFrom] = useState('1');
@@ -154,7 +154,7 @@ export function BatchDialog({ mode: initialMode, data }: { mode: 'rule' | 'csv';
         <div className="batch-rule">
           <div className="field">
             <label htmlFor="b-name">
-              名稱範本 <Tip text="{n} 會替換為編號，例：student{n} → student001" />
+              名稱範本 <Tip text="{n} 會替換為編號，例：host{n} → host001" />
             </label>
             <div className="suffix-input">
               <input id="b-name" className="input mono" value={nameTpl} onChange={(e) => setNameTpl(e.target.value)} />
@@ -219,7 +219,7 @@ export function BatchDialog({ mode: initialMode, data }: { mode: 'rule' | 'csv';
             className="input mono csv-text"
             aria-label="CSV 內容"
             value={csv}
-            placeholder={'name,type,content,owner\nstudent001,A,10.0.3.1,王小明'}
+            placeholder={'name,type,content,owner\nvm001,A,10.0.3.1,範例使用者'}
             onChange={(e) => setCsv(e.target.value)}
           />
         </div>
@@ -238,9 +238,7 @@ export function BatchDialog({ mode: initialMode, data }: { mode: 'rule' | 'csv';
           <label htmlFor="b-exp">到期日</label>
           <div className="row-gap">
             <input id="b-exp" className="input date" type="date" value={expires} onChange={(e) => setExpires(e.target.value)} />
-            <button type="button" className="btn small" onClick={() => setExpires(semesterEnd(data.today))}>
-              學期末
-            </button>
+            <ExpiryButtons data={data} onPick={setExpires} />
           </div>
         </div>
       </div>

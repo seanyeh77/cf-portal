@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, errMsg } from '../../shared/api';
-import { addMonth, semesterEnd } from '../../shared/format';
 import { Dialog, DialogActions, Tip, toast } from '../../shared/ui';
 import { act, refreshRecords, useRecords } from '../lib/data';
+import { ExpiryButtons } from '../lib/expiry';
 import { ownersOf, sub } from '../lib/records';
 import { closeModal, drawerStore, modalStore, selectionStore, useStore } from '../lib/store';
 import type { DNSRecord, RecordsData } from '../types';
@@ -163,12 +163,7 @@ function BulkMetaDialog({ ids, focusOwner, data }: { ids: string[]; focusOwner?:
         '到期日',
         <div className="row-gap">
           <input className="input date" type="date" disabled={!on.expires_at} value={v.expires_at} aria-label="到期日" onChange={(e) => set('expires_at', e.target.value)} />
-          <button type="button" className="btn small" disabled={!on.expires_at} onClick={() => set('expires_at', addMonth(data.today))}>
-            一個月
-          </button>
-          <button type="button" className="btn small" disabled={!on.expires_at} onClick={() => set('expires_at', semesterEnd(data.today))}>
-            學期末
-          </button>
+          <ExpiryButtons data={data} disabled={!on.expires_at} onPick={(d) => set('expires_at', d)} />
           <Tip text="空白代表清除到期日。" />
         </div>,
       )}

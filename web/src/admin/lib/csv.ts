@@ -53,7 +53,7 @@ export function csvObjects(text: string): Record<string, string>[] {
   });
 }
 
-export const CSV_TEMPLATE = 'name,type,content,proxied,ttl,comment,owner,purpose,notes,expires_at,auto_delete,no_scan\nstudent001,A,10.0.3.101,false,1,,王小明,課程 VM,,2027-01-31,true,false\n';
+export const CSV_TEMPLATE = 'name,type,content,proxied,ttl,comment,owner,purpose,notes,expires_at,auto_delete,no_scan\nvm001,A,10.0.3.101,false,1,,範例使用者,測試主機,,2027-01-31,true,false\n';
 
 export function truthy(v: string | undefined) {
   return /^(1|true|yes|y|是|啟用)$/i.test((v ?? '').trim());

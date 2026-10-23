@@ -172,7 +172,7 @@ func TestRunAndMaint(t *testing.T) {
 	}
 	cf := cloudflare.New(srv.URL+"/client/v4", "tok", mockcf.Zone, "", "")
 	ctx := context.Background()
-	stud := m.Find("A", "student001")
+	stud := m.Find("A", "host001")
 	st.PutMeta(ctx, stud.ID, model.Meta{NoScan: true})
 	st.PutScan(ctx, stud.ID, 1, false, "", "x", "", "")
 	st.PutScan(ctx, "gone", 1, false, "", "x", "", "")
@@ -200,13 +200,13 @@ func TestRunAndMaint(t *testing.T) {
 	mt := &Maint{CF: cf, Store: st, Snaps: &snapshots.Store{Dir: filepath.Join(dir, "snapshots"), Loc: loc}, Loc: loc, Keep: 30, Interval: time.Hour}
 	var forgotten []string
 	mt.Forget = func(_ context.Context, id string) { forgotten = append(forgotten, id); st.ForgetRecord(ctx, id) }
-	exp := m.Find("A", "student002")
-	keep := m.Find("A", "student003")
+	exp := m.Find("A", "host002")
+	keep := m.Find("A", "host003")
 	st.PutMeta(ctx, exp.ID, model.Meta{Owner: "x", ExpiresAt: "2026-10-21", AutoDelete: true})
 	st.PutMeta(ctx, keep.ID, model.Meta{Owner: "x", ExpiresAt: "2026-10-21"})
 	now := time.Date(2026, 10, 22, 9, 0, 0, 0, loc)
 	n, err := mt.AutoDelete(ctx, now)
-	if err != nil || n != 1 || m.Find("A", "student002") != nil || m.Find("A", "student003") == nil || len(forgotten) != 1 {
+	if err != nil || n != 1 || m.Find("A", "host002") != nil || m.Find("A", "host003") == nil || len(forgotten) != 1 {
 		t.Fatalf("auto delete n=%d err=%v", n, err)
 	}
 	audit, _ := st.Audit(ctx, 10)

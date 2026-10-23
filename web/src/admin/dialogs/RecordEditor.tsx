@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, errMsg } from '../../shared/api';
-import { addMonth, semesterEnd } from '../../shared/format';
 import { confirmDialog, Dialog, DialogActions, Tip, toast } from '../../shared/ui';
 import { refreshRecords } from '../lib/data';
+import { ExpiryButtons } from '../lib/expiry';
 import {
   dependents,
   fqdn,
@@ -304,12 +304,7 @@ export function RecordEditor({ record, data, focus }: { record?: DNSRecord; data
             <label htmlFor="ed-exp">到期日</label>
             <div className="row-gap">
               <input ref={refs.expires} id="ed-exp" className="input date" type="date" value={expires} onChange={(e) => setExpires(e.target.value)} />
-              <button type="button" className="btn small" onClick={() => setExpires(addMonth(data.today))}>
-                一個月
-              </button>
-              <button type="button" className="btn small" onClick={() => setExpires(semesterEnd(data.today))}>
-                學期末
-              </button>
+              <ExpiryButtons data={data} onPick={setExpires} />
               <button type="button" className="btn small" onClick={() => setExpires('')}>
                 清除
               </button>

@@ -100,6 +100,9 @@ export type RecordsData = {
     name_rule_hint: string;
     name_rule: string;
     requests_enabled: string;
+    expiry_cycle_name: string;
+    expiry_cycle_dates: string;
+    preset_tags: string;
   };
 };
 

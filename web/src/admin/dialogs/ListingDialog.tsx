@@ -6,7 +6,11 @@ import { distinctOf, sub } from '../lib/records';
 import { closeModal } from '../lib/store';
 import type { DNSRecord, Listing, RecordsData } from '../types';
 
-const PRESET_TAGS = ['需 VPN', '需帳號', '課程用', '測試中', '成員限定'];
+const splitTags = (s: string) =>
+  s
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean);
 
 type IconMode = 'auto' | 'si' | 'upload' | 'none';
 
@@ -31,14 +35,11 @@ export function ListingDialog({ record, data }: { record: DNSRecord; data: Recor
 
   const categories = useMemo(() => distinctOf(data.records, (r) => r.listing?.category), [data.records]);
   const usedTags = useMemo(() => {
-    const s = new Set<string>(PRESET_TAGS);
+    const s = new Set<string>(splitTags(data.settings.preset_tags));
     data.records.forEach((r) => r.listing?.tags.split(',').forEach((t) => t.trim() && s.add(t.trim())));
     return Array.from(s);
-  }, [data.records]);
-  const tagList = tags
-    .split(',')
-    .map((t) => t.trim())
-    .filter(Boolean);
+  }, [data.records, data.settings.preset_tags]);
+  const tagList = splitTags(tags);
 
   const addTag = (t: string) => {
     if (tagList.includes(t)) return;

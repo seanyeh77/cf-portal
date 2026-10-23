@@ -15,9 +15,9 @@ export async function seed(request) {
   const data = await (await request.get(BASE + '/api/records')).json();
   const id = (n) => data.records.find((r) => r.name === n + '.example.org')?.id;
   const listings = [
-    ['gitlab', { title: 'GitLab', category: '開發工具', description: '程式碼代管與 CI，課程作業繳交使用。', tags: ['需帳號', '成員限定'], featured: true, icon: 'auto', url: MOCK + '/svc/gitlab/' }],
+    ['gitlab', { title: 'GitLab', category: '開發工具', description: '程式碼代管與 CI。', tags: ['需帳號', '成員限定'], featured: true, icon: 'auto', url: MOCK + '/svc/gitlab/' }],
     ['grafana', { title: 'Grafana', category: '監控', description: '主機與服務監控儀表板。', tags: ['需 VPN'], featured: true, icon: 'si:grafana', url: MOCK + '/svc/grafana/' }],
-    ['jupyter', { title: 'JupyterHub', category: '教學', description: '課程用 Notebook 環境，每位修課學生一個帳號。', tags: ['課程用'], icon: 'none', url: MOCK + '/svc/down/' }],
+    ['jupyter', { title: 'JupyterHub', category: '分析', description: '共用 Notebook 環境，每位成員一個帳號。', tags: ['內部使用'], icon: 'none', url: MOCK + '/svc/down/' }],
     ['git', { title: 'Gitea 鏡像', category: '開發工具', description: '外部套件鏡像。', tags: [], icon: 'none', url: MOCK + '/svc/git/' }],
     ['wg', { title: 'WireGuard', category: '網路', description: 'VPN 設定檔下載與說明。', tags: ['成員限定'], icon: 'si:wireguard', url: MOCK + '/svc/wg/' }],
   ];

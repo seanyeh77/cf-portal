@@ -1,8 +1,10 @@
 package httpapi
 
 import (
+	"maps"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +20,34 @@ var hexColor = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 var settingLimits = map[string]int{
 	"title": 40, "subtitle": 120, "accent": 7, "announce_text": 300, "announce_level": 4, "name_rule": 300,
 	"name_rule_hint": 120, "zombie_days": 3, "expiry_warn_days": 3, "scan_ports": 80, "requests_enabled": 1, "request_note": 1000,
+	"expiry_cycle_name": 10, "expiry_cycle_dates": 200, "preset_tags": 300,
+}
+
+// cycleDates parses a list of MM-DD dates, sorted and without duplicates.
+func cycleDates(v string) ([]string, error) {
+	var out []string
+	for _, p := range strings.FieldsFunc(v, func(r rune) bool { return r == ',' || r == '，' || r == ' ' || r == '、' }) {
+		// 2001 is not a leap year, so 02-29 is rejected: it would skip most years.
+		if _, err := time.Parse("2006-01-02", "2001-"+p); err != nil || len(p) != 5 {
+			return nil, invalidf("結束日須為 MM-DD 格式，例：01-31（收到「" + p + "」）")
+		}
+		if !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
+// splitList splits a comma separated list, dropping blanks and duplicates.
+func splitList(v string) []string {
+	var out []string
+	for _, p := range strings.FieldsFunc(v, func(r rune) bool { return r == ',' || r == '，' || r == '、' }) {
+		if p = strings.TrimSpace(p); p != "" && !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func (s *Server) settingsOut(set map[string]string) map[string]any {
@@ -76,6 +106,14 @@ func normalizeSetting(k, v string) (string, error) {
 			return "", invalidf(err.Error())
 		}
 		v = scanner.FormatPorts(ports, ",")
+	case "expiry_cycle_dates":
+		ds, err := cycleDates(v)
+		if err != nil {
+			return "", err
+		}
+		v = strings.Join(ds, ", ")
+	case "preset_tags":
+		v = strings.Join(splitList(v), ", ")
 	case "requests_enabled":
 		if v == "true" {
 			v = "1"
@@ -119,6 +157,11 @@ func (s *Server) apiPutSettings(w http.ResponseWriter, r *http.Request) error {
 		if cur[k] != nv {
 			changes[k] = [2]string{cur[k], nv}
 		}
+	}
+	merged := maps.Clone(cur)
+	maps.Copy(merged, save)
+	if (merged["expiry_cycle_name"] == "") != (merged["expiry_cycle_dates"] == "") {
+		return invalidf("自訂到期週期須同時填寫名稱與結束日")
 	}
 	if err := s.Store.SetSettings(ctx, save); err != nil {
 		return err

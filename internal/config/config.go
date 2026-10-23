@@ -179,7 +179,7 @@ func Load(getenv func(string) string) (*Config, error) {
 	if c.CheckInterval < time.Second {
 		r.errs = append(r.errs, "CHECK_INTERVAL must be at least 1 second")
 	}
-	tz := r.str("TIMEZONE", "Asia/Taipei")
+	tz := r.str("TIMEZONE", "UTC")
 	loc, err := time.LoadLocation(tz)
 	if err != nil {
 		r.errs = append(r.errs, fmt.Sprintf("TIMEZONE: unknown time zone %q", tz))

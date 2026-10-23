@@ -19,6 +19,9 @@ const KEYS = [
   'name_rule',
   'requests_enabled',
   'request_note',
+  'expiry_cycle_name',
+  'expiry_cycle_dates',
+  'preset_tags',
 ] as const;
 
 function MediaField({ kind, label, url, hint, onChange }: { kind: 'logo' | 'hero'; label: string; url: string; hint: string; onChange: (s: Settings) => void }) {
@@ -189,13 +192,33 @@ export function SettingsPage() {
           </label>
           <input id="st-hint" className="input" value={form.name_rule_hint} onChange={set('name_rule_hint')} />
         </div>
+        <div className="two">
+          <div className="field">
+            <label htmlFor="st-cycle-name">
+              自訂到期週期名稱 <Tip text="設定後，到期日快捷會多一個此名稱的按鈕，例：學期末、季末、合約到期。與結束日同時留空則不使用。" />
+            </label>
+            <input id="st-cycle-name" className="input" value={form.expiry_cycle_name} maxLength={10} placeholder="例：季末" onChange={set('expiry_cycle_name')} />
+          </div>
+          <div className="field">
+            <label htmlFor="st-cycle-dates">
+              週期結束日 <Tip text="每年的結束日，格式 MM-DD，以逗號分隔。按鈕會選擇今天之後最近的一個，例：01-31, 06-30。" />
+            </label>
+            <input id="st-cycle-dates" className="input mono" value={form.expiry_cycle_dates} placeholder="01-31, 06-30" onChange={set('expiry_cycle_dates')} />
+          </div>
+        </div>
+        <div className="field">
+          <label htmlFor="st-tags">
+            入口常用標籤 <Tip text="上架到入口時可一鍵加入的標籤，以逗號分隔。" />
+          </label>
+          <input id="st-tags" className="input" value={form.preset_tags} onChange={set('preset_tags')} />
+        </div>
         <button type="button" className="linkbtn" aria-expanded={showRule} onClick={() => setShowRule((v) => !v)}>
           {showRule ? '收合自訂命名規則' : '自訂命名規則（進階）'}
         </button>
         {showRule && (
           <div className="field rule-field">
             <label htmlFor="st-rule">
-              自訂命名規則（正規表示式） <Tip text="需完全符合整個子網域名稱，例：(hpc|course)-[a-z0-9-]+。含 _ 開頭段落的名稱不套用。留空則只檢查基本格式。" />
+              自訂命名規則（正規表示式） <Tip text="需完全符合整個子網域名稱，例：(dev|prod)-[a-z0-9-]+。含 _ 開頭段落的名稱不套用。留空則只檢查基本格式。" />
             </label>
             <input id="st-rule" className="input mono" value={form.name_rule} onChange={set('name_rule')} />
           </div>

@@ -37,22 +37,27 @@ function iso(d: Date) {
   return d.toISOString().slice(0, 10);
 }
 
-/** Adds one calendar month, clamping to the month's last day. */
-export function addMonth(day: string) {
+/** Adds n calendar months, clamping to the month's last day. */
+export function addMonths(day: string, n: number) {
   const y = +day.slice(0, 4);
-  const m = +day.slice(5, 7);
+  const m = +day.slice(5, 7) - 1 + n;
   const d = +day.slice(8, 10);
   const last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
   return iso(new Date(Date.UTC(y, m, Math.min(d, last))));
 }
 
-/** End of the current semester: Aug-Dec → Jan 31 next year, Jan → Jan 31, else Jun 30. */
-export function semesterEnd(today: string) {
-  const y = +today.slice(0, 4);
-  const m = +today.slice(5, 7);
-  if (m >= 8) return `${y + 1}-01-31`;
-  if (m === 1) return `${y}-01-31`;
-  return `${y}-06-30`;
+/** December 31 of the day's year. */
+export function yearEnd(day: string) {
+  return day.slice(0, 4) + '-12-31';
+}
+
+/** The first of the yearly MM-DD dates on or after day, or '' when there are none. */
+export function nextCycleEnd(day: string, dates: string[]) {
+  const md = day.slice(5);
+  const sorted = [...dates].sort();
+  if (!sorted.length) return '';
+  const next = sorted.find((d) => d >= md);
+  return next ? `${day.slice(0, 4)}-${next}` : `${+day.slice(0, 4) + 1}-${sorted[0]}`;
 }
 
 export function pct(v: number | null | undefined) {

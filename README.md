@@ -54,7 +54,7 @@ Zone Resources 選 **Include · Specific zone · example.org**，不要授權其
 
 - `portal hashpw` 會要求輸入兩次密碼（至少 12 字元），輸出 `argon2id:<m>:<t>:<p>:<salt>:<hash>`。格式刻意不含 `$`，可直接放進 `.env`，不會被 docker compose 的變數插值破壞。
 - `SECRET_KEY` 用來簽 session cookie，至少 32 字元。更換後所有人需重新登入。
-- 帳號只有一組（`ADMIN_USERNAME`，預設 `admin`），由幹部共用並保存在密碼管理器。同一 IP 連續失敗 5 次會鎖 15 分鐘。
+- 帳號只有一組（`ADMIN_USERNAME`，預設 `admin`），由管理者共用並保存在密碼管理器。同一 IP 連續失敗 5 次會鎖 15 分鐘。
 
 ## 4. 存取限制：允許清單與 wg-easy
 
@@ -71,6 +71,19 @@ Zone Resources 選 **Include · Specific zone · example.org**，不要授權其
 
 **Docker 注意事項**：預設清單刻意**不含** `172.16.0.0/12`。Docker bridge gateway 位於此範圍；經 Docker userland proxy 轉送的連線，來源會變成 gateway IP，若允許此範圍等於繞過限制。
 在主機本機 `curl localhost:8080` 會得到 403，這是正常的：本機連線經 docker-proxy，來源是 bridge gateway。從其他內網主機連入時，Docker 以 iptables DNAT 轉送，會保留真實來源 IP。
+
+### 公開服務入口頁
+
+若入口頁要讓網際網路上的任何人瀏覽，把 `ALLOWED_CIDRS` 設為全部位址，並**明確設定** `ADMIN_ALLOWED_CIDRS`，讓後台仍只開放內網：
+
+```sh
+ALLOWED_CIDRS=0.0.0.0/0,::/0
+ADMIN_ALLOWED_CIDRS=127.0.0.0/8,::1/128,10.0.0.0/8,192.168.0.0/16,fc00::/7
+```
+
+- `ADMIN_ALLOWED_CIDRS` 未設定時會沿用 `ALLOWED_CIDRS`，上面的設定若漏掉第二行，後台也會對外公開。
+- 公開後，入口頁會顯示所有上架服務的名稱、網址與連線狀態；不想公開的服務請勿上架。
+- 申請頁 `/request` 也會一併公開。若不希望任何人都能送出申請，請在「網站設定 → 申請網域」關閉「開放申請」。
 
 ## 5. Reverse proxy 與 `TRUSTED_PROXIES`
 
@@ -160,7 +173,7 @@ docker compose start portal
 | `SCAN_DNS_CANARY` | `cloudflare.com` | 確認 container 能查外部 DNS 的網域 |
 | `MAINT_INTERVAL` | `3600` | 例行作業（每日快照、到期刪除）間隔（秒） |
 | `SNAPSHOT_KEEP` | `30` | 保留幾份自動快照（手動快照不會自動刪除） |
-| `TIMEZONE` | `Asia/Taipei` | 判斷「今天」與到期日用 |
+| `TIMEZONE` | `UTC` | 判斷「今天」與到期日用的時區，例：`Asia/Taipei` |
 | `LISTEN_ADDR` | `:8080` | container 內的監聽位址；使用 compose 時請勿修改，改用 `PORTAL_PORT` |
 
 啟動時會檢查必填變數、CIDR 格式與時區，錯誤時印出所有問題並結束。

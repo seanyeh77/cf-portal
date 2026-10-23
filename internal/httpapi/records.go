@@ -173,7 +173,8 @@ func (s *Server) apiRecords(w http.ResponseWriter, r *http.Request) error {
 		"kinds": analysis.Kinds, "groups": z.Analysis.Groups,
 		"scan": s.Scanner.Status(), "pending_requests": pending, "last_snapshot": lastSnap, "tunnel_error": z.TunnelErr,
 		"settings": map[string]string{"zombie_days": set["zombie_days"], "expiry_warn_days": set["expiry_warn_days"], "scan_ports": set["scan_ports"],
-			"name_rule_hint": set["name_rule_hint"], "name_rule": set["name_rule"], "requests_enabled": set["requests_enabled"]},
+			"name_rule_hint": set["name_rule_hint"], "name_rule": set["name_rule"], "requests_enabled": set["requests_enabled"],
+			"expiry_cycle_name": set["expiry_cycle_name"], "expiry_cycle_dates": set["expiry_cycle_dates"], "preset_tags": set["preset_tags"]},
 	})
 	return nil
 }

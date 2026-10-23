@@ -1,6 +1,7 @@
 import { Fragment, memo, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { api, errMsg } from '../../shared/api';
-import { addMonth, relTime, semesterEnd } from '../../shared/format';
+import { relTime } from '../../shared/format';
+import { expiryPresets, type ExpiryCycle } from '../lib/expiry';
 import { MenuButton, Tip, toast, type MenuItem } from '../../shared/ui';
 import { act, refreshRecords, useRecords } from '../lib/data';
 import {
@@ -45,12 +46,14 @@ export function Records() {
 
 const saveMeta = (id: string, patch: Record<string, unknown>, msg: string) => act(() => api('PUT', `/api/records/${id}/meta`, patch), msg);
 
-function extendItems(r: DNSRecord, today: string): MenuItem[] {
+function extendItems(r: DNSRecord, today: string, cycle: ExpiryCycle): MenuItem[] {
   const cur = r.meta.expires_at;
   const base = cur && cur > today ? cur : today;
   return [
-    { label: `延長一個月（${addMonth(base)}）`, onClick: () => saveMeta(r.id, { expires_at: addMonth(base) }, `已延長到期日至 ${addMonth(base)}`) },
-    { label: `延長到學期末（${semesterEnd(today)}）`, onClick: () => saveMeta(r.id, { expires_at: semesterEnd(today) }, `已延長到期日至 ${semesterEnd(today)}`) },
+    ...expiryPresets(base, cycle).map((p) => ({
+      label: `${p.extend}（${p.date}）`,
+      onClick: () => saveMeta(r.id, { expires_at: p.date }, `已延長到期日至 ${p.date}`),
+    })),
     { label: '取消到期日', onClick: () => saveMeta(r.id, { expires_at: '', auto_delete: false }, '已取消到期日') },
     'sep',
     { label: '自訂…', onClick: () => openEditor(r.id, 'expires') },
@@ -109,7 +112,7 @@ function StatusCell({ r, pending }: { r: DNSRecord; pending: boolean }) {
   );
 }
 
-function ExpiryCell({ r, today }: { r: DNSRecord; today: string }) {
+function ExpiryCell({ r, today, cycle }: { r: DNSRecord; today: string; cycle: ExpiryCycle }) {
   const v = expiryView(r, today);
   if (!v) return null;
   return (
@@ -118,7 +121,7 @@ function ExpiryCell({ r, today }: { r: DNSRecord; today: string }) {
         {v.text}
       </span>
       {v.extend && (
-        <MenuButton label="延長" className="linkbtn" items={extendItems(r, today)} align="left" testId={'extend-' + r.id} />
+        <MenuButton label="延長" className="linkbtn" items={extendItems(r, today, cycle)} align="left" testId={'extend-' + r.id} />
       )}
     </div>
   );
@@ -190,6 +193,7 @@ const Row = memo(function Row({
   r,
   zone,
   today,
+  cycle,
   selected,
   pending,
   showExpiry,
@@ -197,6 +201,7 @@ const Row = memo(function Row({
   r: DNSRecord;
   zone: string;
   today: string;
+  cycle: ExpiryCycle;
   selected: boolean;
   pending: boolean;
   showExpiry: boolean;
@@ -291,7 +296,7 @@ const Row = memo(function Row({
       </td>
       {showExpiry && (
         <td className="c-expiry">
-          <ExpiryCell r={r} today={today} />
+          <ExpiryCell r={r} today={today} cycle={cycle} />
         </td>
       )}
       <td className="c-actions">
@@ -371,12 +376,17 @@ function RecordsView({ data }: { data: RecordsData }) {
     return { out, other };
   }, [view.byTarget, sorted, targetCounts]);
 
+  const { expiry_cycle_name, expiry_cycle_dates } = data.settings;
+  // A stable object, so polling does not re-render every memoized row.
+  const cycle = useMemo(() => ({ name: expiry_cycle_name, dates: expiry_cycle_dates }), [expiry_cycle_name, expiry_cycle_dates]);
+
   const renderRow = (r: DNSRecord) => (
     <Row
       key={r.id}
       r={r}
       zone={zone}
       today={data.today}
+      cycle={cycle}
       selected={selection.has(r.id)}
       pending={pending.has(r.id)}
       showExpiry={showExpiry}
@@ -560,10 +570,10 @@ function RecordsView({ data }: { data: RecordsData }) {
                 label: '啟用連線檢查',
                 onClick: () => bulkSet(selectedIds, { no_scan: false }, '已啟用連線檢查'),
               },
-              {
-                label: '延長到學期末',
-                onClick: () => bulkSet(selectedIds, { expires_at: semesterEnd(data.today) }, `已將到期日設為 ${semesterEnd(data.today)}`),
-              },
+              ...expiryPresets(data.today, cycle).map((p) => ({
+                label: `到期日設為${p.label}後（${p.date}）`,
+                onClick: () => bulkSet(selectedIds, { expires_at: p.date }, `已將到期日設為 ${p.date}`),
+              })),
             ]}
           />
           <span className="spacer" />

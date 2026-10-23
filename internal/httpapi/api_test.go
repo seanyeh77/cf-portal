@@ -42,7 +42,7 @@ func TestRecordsListing(t *testing.T) {
 		t.Error("SRV editable")
 	}
 	groups := fmt.Sprint(data["groups"])
-	if !strings.Contains(groups, "student 20") {
+	if !strings.Contains(groups, "host 20") {
 		t.Errorf("groups %s", groups)
 	}
 }
@@ -201,9 +201,9 @@ func TestBatchAndBulk(t *testing.T) {
 	}
 	// bulk meta
 	ids := []string{e.mock.Find("A", "vm01").ID, vm.ID}
-	e.mustOK(e.do("POST", "/api/records/bulk-meta", map[string]any{"ids": ids, "set": map[string]any{"purpose": "課程", "expires_at": "2027-01-31"}}))
+	e.mustOK(e.do("POST", "/api/records/bulk-meta", map[string]any{"ids": ids, "set": map[string]any{"purpose": "專案", "expires_at": "2027-01-31"}}))
 	m, _ := e.srv.Store.Meta(context.Background(), vm.ID)
-	if m.Owner != "TA" || m.Purpose != "課程" || m.ExpiresAt != "2027-01-31" {
+	if m.Owner != "TA" || m.Purpose != "專案" || m.ExpiresAt != "2027-01-31" {
 		t.Fatalf("bulk meta %+v", m)
 	}
 	// bulk delete takes a snapshot first
@@ -217,7 +217,7 @@ func TestBatchAndBulk(t *testing.T) {
 	}
 	found := false
 	for _, r := range snap.Records {
-		if r.ID == vm.ID && r.Meta.Purpose == "課程" {
+		if r.ID == vm.ID && r.Meta.Purpose == "專案" {
 			found = true
 		}
 	}
@@ -316,8 +316,8 @@ func TestExportCSV(t *testing.T) {
 	if !strings.Contains(body, `"'=HYPERLINK(""x"")"`) {
 		t.Fatalf("formula not neutralized:\n%s", body)
 	}
-	if !strings.Contains(body, "student019.example.org,A,10.0.3.119,false,1,,,,,,false,false,,,student,,,未指派負責人") {
-		t.Fatalf("student row:\n%s", body)
+	if !strings.Contains(body, "host019.example.org,A,10.0.3.119,false,1,,,,,,false,false,,,host,,,未指派負責人") {
+		t.Fatalf("host row:\n%s", body)
 	}
 }
 
@@ -428,11 +428,11 @@ func TestAutoDeleteViaAPI(t *testing.T) {
 	e := newEnv(t)
 	e.login()
 	e.srv.Now = func() time.Time { return time.Date(2026, 10, 22, 12, 0, 0, 0, e.srv.Cfg.Timezone) }
-	s := e.mock.Find("A", "student005")
+	s := e.mock.Find("A", "host005")
 	e.mustOK(e.do("PUT", "/api/listings/"+s.ID, map[string]any{"title": "S5", "icon": "none"}))
 	e.mustOK(e.do("PUT", "/api/records/"+s.ID+"/meta", map[string]any{"expires_at": "2026-10-01", "auto_delete": true}))
 	n, err := e.srv.Maint.AutoDelete(context.Background(), e.srv.Now())
-	if err != nil || n != 1 || e.mock.Find("A", "student005") != nil {
+	if err != nil || n != 1 || e.mock.Find("A", "host005") != nil {
 		t.Fatalf("auto delete %d %v", n, err)
 	}
 	if l, _ := e.srv.Store.Listing(context.Background(), s.ID); l != nil {
@@ -485,6 +485,15 @@ func TestListingsAndSettings(t *testing.T) {
 	s := e.mustOK(e.do("PUT", "/api/settings", map[string]any{"scan_ports": "22, 443 22", "title": "Lab"}))
 	if s["scan_ports"] != "22,443" || s["title"] != "Lab" || s["accent"] != "#2dd4bf" {
 		t.Fatalf("settings %v", s)
+	}
+	s = e.mustOK(e.do("PUT", "/api/settings", map[string]any{"expiry_cycle_name": "學期末", "expiry_cycle_dates": "06-30，01-31 06-30", "preset_tags": "需 VPN, , 測試中、需 VPN"}))
+	if s["expiry_cycle_dates"] != "01-31, 06-30" || s["preset_tags"] != "需 VPN, 測試中" {
+		t.Fatalf("cycle/tags %v %v", s["expiry_cycle_dates"], s["preset_tags"])
+	}
+	for _, bad := range []map[string]any{{"expiry_cycle_dates": "02-29"}, {"expiry_cycle_dates": "1-31"}, {"expiry_cycle_name": ""}} {
+		if w := e.do("PUT", "/api/settings", bad); w.Code != 422 {
+			t.Errorf("%v accepted: %d", bad, w.Code)
+		}
 	}
 	if w := e.upload("/api/settings/media/hero", "h.svg", []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`)); w.Code != 422 {
 		t.Fatal("svg hero accepted")
@@ -607,8 +616,8 @@ func TestNameRuleOnNewNamesOnly(t *testing.T) {
 func TestBulkMetaAuditedPerRecord(t *testing.T) {
 	e := newEnv(t)
 	e.login()
-	a, b := e.mock.Find("A", "student001"), e.mock.Find("A", "student002")
-	e.mustOK(e.do("POST", "/api/records/bulk-meta", map[string]any{"ids": []string{a.ID, b.ID}, "set": map[string]any{"owner": "助教"}}))
+	a, b := e.mock.Find("A", "host001"), e.mock.Find("A", "host002")
+	e.mustOK(e.do("POST", "/api/records/bulk-meta", map[string]any{"ids": []string{a.ID, b.ID}, "set": map[string]any{"owner": "維運組"}}))
 	hist := e.mustOK(e.do("GET", "/api/records/"+a.ID+"/history", nil))["entries"].([]any)
 	if len(hist) != 1 || hist[0].(map[string]any)["action"] != "bulk_meta" || !strings.Contains(hist[0].(map[string]any)["detail"].(string), `"meta_before"`) {
 		t.Fatalf("history of a bulk-edited record: %v", hist)
