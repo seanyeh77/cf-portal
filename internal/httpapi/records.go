@@ -273,6 +273,12 @@ func (s *Server) updateRecord(r *http.Request, cur model.Record, in model.Record
 	if err := s.checkConflict(r.Context(), in, cur.ID); err != nil {
 		return nil, false, err
 	}
+	return s.writeUpdate(r, cur, in, metaBefore, metaAfter, action)
+}
+
+// writeUpdate is updateRecord after the conflict check, for callers that
+// checked against a zone they track themselves.
+func (s *Server) writeUpdate(r *http.Request, cur model.Record, in model.RecordInput, metaBefore, metaAfter model.Meta, action string) (*model.Record, bool, error) {
 	ctx, err := writeContext(r)
 	if err != nil {
 		return nil, false, err

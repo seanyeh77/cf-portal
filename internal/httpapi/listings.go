@@ -91,10 +91,6 @@ func (s *Server) apiPutListing(w http.ResponseWriter, r *http.Request) error {
 	if err := decode(w, r, &b); err != nil {
 		return err
 	}
-	b, err := cleanListing(b)
-	if err != nil {
-		return err
-	}
 	ctx := r.Context()
 	rec, err := s.CF.Get(ctx, id)
 	if err != nil {
@@ -104,6 +100,24 @@ func (s *Server) apiPutListing(w http.ResponseWriter, r *http.Request) error {
 	if err != nil && err != store.ErrNotFound {
 		return err
 	}
+	iconErr, err := s.saveListing(r, *rec, prev, b)
+	if err != nil {
+		return err
+	}
+	s.writeListing(w, r, id, map[string]any{"icon_error": iconErr})
+	return nil
+}
+
+// saveListing validates and stores the listing of rec, replacing prev
+// (nil for a new one), and audits it. It reports a failed Simple Icons
+// lookup separately: the listing is saved without the icon.
+func (s *Server) saveListing(r *http.Request, rec model.Record, prev *model.Listing, b listingBody) (string, error) {
+	b, err := cleanListing(b)
+	if err != nil {
+		return "", err
+	}
+	ctx := r.Context()
+	id := rec.ID
 	l := model.Listing{RecordID: id, Hostname: rec.Name, Title: b.Title, Description: b.Description, Category: b.Category,
 		SortOrder: b.SortOrder, Featured: b.Featured, Tags: strings.Join(b.Tags, ","), Icon: b.Icon}
 	if b.URL != "" {
@@ -121,7 +135,7 @@ func (s *Server) apiPutListing(w http.ResponseWriter, r *http.Request) error {
 		l.IconFile = nil
 	case b.Icon == "upload":
 		if prev == nil || prev.Icon != "upload" || prev.IconFile == nil {
-			return httpErr{http.StatusUnprocessableEntity, "請先上傳圖片"}
+			return "", httpErr{http.StatusUnprocessableEntity, "請先上傳圖片"}
 		}
 	case b.Icon == "auto":
 		urlChanged := prev == nil || prev.EffectiveURL() != l.EffectiveURL()
@@ -132,6 +146,9 @@ func (s *Server) apiPutListing(w http.ResponseWriter, r *http.Request) error {
 			}
 		}
 	case strings.HasPrefix(b.Icon, "si:"):
+		if prev != nil && prev.Icon == b.Icon && prev.IconFile != nil {
+			break // already fetched
+		}
 		c, cancel := context.WithTimeout(ctx, 15*time.Second)
 		name, err := s.Icons.FetchSimpleIcon(c, strings.TrimPrefix(b.Icon, "si:"))
 		cancel()
@@ -143,7 +160,7 @@ func (s *Server) apiPutListing(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 	if err := s.Store.PutListing(ctx, l); err != nil {
-		return err
+		return "", err
 	}
 	if oldFile != nil && (l.IconFile == nil || *l.IconFile != *oldFile) {
 		s.removeIconFile(ctx, oldFile)
@@ -153,8 +170,7 @@ func (s *Server) apiPutListing(w http.ResponseWriter, r *http.Request) error {
 		go s.fetchAutoIcon(l)
 	}
 	s.Health.CheckSoon(l)
-	s.writeListing(w, r, id, map[string]any{"icon_error": iconErr})
-	return nil
+	return iconErr, nil
 }
 
 // writeListing answers with the listing as stored now, plus extra fields.
@@ -272,8 +288,17 @@ func (s *Server) apiUploadIcon(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *Server) apiDeleteListing(w http.ResponseWriter, r *http.Request) error {
+	if err := s.removeListing(r, r.PathValue("id")); err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	return nil
+}
+
+// removeListing takes a record off the portal and audits it.
+func (s *Server) removeListing(r *http.Request, id string) error {
 	ctx := r.Context()
-	l, err := s.Store.Listing(ctx, r.PathValue("id"))
+	l, err := s.Store.Listing(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -282,6 +307,5 @@ func (s *Server) apiDeleteListing(w http.ResponseWriter, r *http.Request) error 
 	}
 	s.removeIconFile(ctx, l.IconFile)
 	s.auditLog(r, "listing_remove", l.Hostname, map[string]any{"record_id": l.RecordID, "title": l.Title})
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	return nil
 }

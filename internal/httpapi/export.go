@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/csv"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,6 +31,11 @@ func (s *Server) apiExportCSV(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	recs := z.Records
+	// ?ids=a,b exports only those records.
+	if q := r.URL.Query().Get("ids"); q != "" {
+		want := strings.Split(q, ",")
+		recs = slices.DeleteFunc(slices.Clone(recs), func(rec model.Record) bool { return !slices.Contains(want, rec.ID) })
+	}
 	sort.SliceStable(recs, func(i, j int) bool { return recs[i].Name < recs[j].Name })
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+s.Cfg.CFZoneName+"-handover-"+s.Now().In(s.Cfg.Timezone).Format("20060102")+`.csv"`)

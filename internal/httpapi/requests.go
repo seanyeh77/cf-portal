@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
 	"net/http"
@@ -202,7 +203,12 @@ func (s *Server) loadRequest(r *http.Request) (*model.Request, error) {
 	if err != nil {
 		return nil, httpErr{http.StatusNotFound, "找不到申請"}
 	}
-	q, err := s.Store.Request(r.Context(), id)
+	return s.pendingRequest(r.Context(), id)
+}
+
+// pendingRequest returns a request that still awaits a decision.
+func (s *Server) pendingRequest(ctx context.Context, id int64) (*model.Request, error) {
+	q, err := s.Store.Request(ctx, id)
 	if err != nil {
 		return nil, httpErr{http.StatusNotFound, "找不到申請"}
 	}
@@ -210,6 +216,11 @@ func (s *Server) loadRequest(r *http.Request) (*model.Request, error) {
 		return nil, httpErr{http.StatusConflict, "此申請已處理"}
 	}
 	return q, nil
+}
+
+// requestMeta is the meta a request's record gets unless the admin edits it.
+func requestMeta(q *model.Request) model.Meta {
+	return model.Meta{Owner: q.Requester + "（" + q.Contact + "）", Purpose: q.Purpose, ExpiresAt: q.ExpiresAt}
 }
 
 func (s *Server) apiApprove(w http.ResponseWriter, r *http.Request) error {
@@ -229,20 +240,29 @@ func (s *Server) apiApprove(w http.ResponseWriter, r *http.Request) error {
 	if b.Record != nil {
 		in = *b.Record
 	}
-	meta := model.Meta{Owner: q.Requester + "（" + q.Contact + "）", Purpose: q.Purpose, ExpiresAt: q.ExpiresAt}
+	meta := requestMeta(q)
 	if b.Meta != nil {
 		meta = *b.Meta
 	}
-	note := trimLen(b.Note, 500)
-	rec, _, err := s.createRecord(r, in, meta, true, "request_approve", map[string]any{"request_id": q.ID, "note": note})
+	rec, err := s.approveRequest(r, q, in, meta, b.Note)
 	if err != nil {
-		return err
-	}
-	if err := s.Store.DecideRequest(r.Context(), q.ID, "approved", note, &rec.ID); err != nil && !errors.Is(err, store.ErrNotFound) {
 		return err
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"record": rec})
 	return nil
+}
+
+// approveRequest creates the request's record and marks it approved.
+func (s *Server) approveRequest(r *http.Request, q *model.Request, in model.RecordInput, meta model.Meta, note string) (*model.Record, error) {
+	note = trimLen(note, 500)
+	rec, _, err := s.createRecord(r, in, meta, true, "request_approve", map[string]any{"request_id": q.ID, "note": note})
+	if err != nil {
+		return nil, err
+	}
+	if err := s.Store.DecideRequest(r.Context(), q.ID, "approved", note, &rec.ID); err != nil && !errors.Is(err, store.ErrNotFound) {
+		return nil, err
+	}
+	return rec, nil
 }
 
 func (s *Server) apiReject(w http.ResponseWriter, r *http.Request) error {
@@ -256,7 +276,16 @@ func (s *Server) apiReject(w http.ResponseWriter, r *http.Request) error {
 	if err := decode(w, r, &b); err != nil {
 		return err
 	}
-	note := trimLen(b.Note, 500)
+	if err := s.rejectRequest(r, q, b.Note); err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	return nil
+}
+
+// rejectRequest marks a request rejected; the reason is required.
+func (s *Server) rejectRequest(r *http.Request, q *model.Request, note string) error {
+	note = trimLen(note, 500)
 	if note == "" {
 		return httpErr{http.StatusUnprocessableEntity, "請填寫駁回原因"}
 	}
@@ -264,6 +293,5 @@ func (s *Server) apiReject(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	s.auditLog(r, "request_reject", q.Name, map[string]any{"request_id": q.ID, "note": note})
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	return nil
 }
